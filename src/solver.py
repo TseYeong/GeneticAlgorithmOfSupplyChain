@@ -1,3 +1,4 @@
+import gekko
 import pandas as pd
 from gekko import GEKKO
 import gurobipy as grb
@@ -24,6 +25,21 @@ class SupplyChainSolver:
         Cd (list): List of distribution center capacities for each DC.
         D (list): List of demands for each customer zone.
         SL (list): List of fill rate (service levels) for each customer.
+        rs (list): List of reliability indexes for each supplier.
+        rp (list): List of reliability indexes for each plant.
+        rd (list): List of reliability indexes for each DC.
+        fs (list): List of flexibility indexes for each supplier.
+        FCp (list): List of fixed cost for each plant.
+        FCd (list): List of fixed cost for each DC.
+        Ssp (list of lists): Matrix of shipping cost from suppliers to plants.
+        Spd (list of lists): Matrix of shipping cost from plants to DCs.
+        Sdc (list of lists): Matrix of shipping cost from DCs to CZs.
+        rsp (list of lists): Matrix of reliability of arcs from suppliers to plants.
+        rpd (list of lists): Matrix of reliability of arcs from plants to DCs.
+        rdc (list of lists): Matrix of reliability of arcs from DCs to CZs.
+        fsp (list of lists): Matrix of volume flexibility of links from suppliers to plants.
+        fpd (list of lists): Matrix of volume flexibility of links from plants to DCs.
+        fdc (list of lists): Matrix of volume flexibility of links from DCs to CZs.
         Qsp (list of lists): Decision variables for quantities shipped from suppliers to plants.
         Qpd (list of lists): Decision variables for quantities shipped from plants to distribution centers.
         Qdc (list of lists): Decision variables for quantities shipped from DCs to customer zones.
@@ -31,9 +47,9 @@ class SupplyChainSolver:
         qpd (list of lists): Binary decision variables indicating whether a plant is active for a DC.
         qdc (list of lists): Binary decision variables indicating whether a DC is active for a CZ.
         X (list): Binary decision variables for activating plants.
-        Y (list): Binary decision variables for activating distribution centers
+        Y (list): Binary decision variables for activating distribution centers.
     """
-    def __init__(self, instance: str, opt_type: str = 'multi', solver: str = 'Gurobi'):
+    def __init__(self, instance: str, opt_type: str = 'cost', solver: str = 'Gurobi'):
         """
         Initialization function.
 
@@ -44,9 +60,9 @@ class SupplyChainSolver:
         :param solver: The selected solver (Default: 'Gurobi', Option: 'GEKKO', 'Gurobi')
         :type solver: str
         """
-        if opt_type not in ('multi', 'cost', 'reli', 'flex'):
+        if opt_type not in ('cost', 'reli', 'flex'):
             raise ValueError("Invalid value for 'opt_type'. "
-                             "Expected 'cost', 'reli', 'flex' or 'multi', but got '{}'.".format(self.obj))
+                             "Expected 'cost', 'reli', or 'flex', but got '{}'.".format(self.obj))
 
         if solver not in ('GEKKO', 'Gurobi'):
             raise ValueError("Invalid value for 'solver'. "
@@ -125,7 +141,7 @@ class SupplyChainSolver:
             self.X = [self.model.Var(lb=0, ub=1, integer=True) for _ in range(self.J)]
             self.Y = [self.model.Var(lb=0, ub=1, integer=True) for _ in range(self.K)]
 
-            if opt_type in ('multi', 'reli'):
+            if opt_type == 'reli':
                 self.Rp = [self.model.Var(lb=0, ub=1, integer=False) for _ in range(self.J)]
                 self.Rd = [self.model.Var(lb=0, ub=1, integer=False) for _ in range(self.K)]
                 self.Rc = [self.model.Var(lb=0, ub=1, integer=False) for _ in range(self.L)]
@@ -144,7 +160,7 @@ class SupplyChainSolver:
                     ] for j in range(self.J)
                 ]
 
-            if opt_type in ('multi', 'flex'):
+            if opt_type == 'flex':
                 self.Dsp = [
                     [
                         self.model.if3(
@@ -204,14 +220,14 @@ class SupplyChainSolver:
             self.X = self.model.addVars(self.J, vtype=grb.GRB.BINARY, name='X')
             self.Y = self.model.addVars(self.K, vtype=grb.GRB.BINARY, name='Y')
 
-            if opt_type in ('multi', 'reli'):
+            if opt_type == 'reli':
                 self.qsp = self.model.addVars(self.I, self.J, vtype=grb.GRB.BINARY, name='qsp')
                 self.qpd = self.model.addVars(self.J, self.K, vtype=grb.GRB.BINARY, name='qpd')
                 self.Rp = self.model.addVars(self.J, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Rp')
                 self.Rd = self.model.addVars(self.K, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Rd')
                 self.Rc = self.model.addVars(self.L, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Rc')
 
-            if opt_type in ('multi', 'flex'):
+            if opt_type == 'flex':
                 self.Dsp = self.model.addVars(self.I, self.J, vtype=grb.GRB.BINARY, name='Dsp')
                 self.Dpd = self.model.addVars(self.J, self.K, vtype=grb.GRB.BINARY, name='Dpd')
                 self.Ddc = self.model.addVars(self.K, self.L, vtype=grb.GRB.BINARY, name='Ddc')
@@ -222,17 +238,12 @@ class SupplyChainSolver:
                 self.Fd = self.model.addVars(self.K, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fd')
                 self.Fc = self.model.addVars(self.L, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fc')
 
-    def set_equations(self):
+    def set_equations(self) -> grb.Model | gekko.GEKKO:
         """
         Function of setting up the constraints for the cost optimization model.
 
-        Constraints include:
-        - Supplier capacity constraint.
-        - Plant capacity constraint.
-        - DC capacity constraint.
-        - Demand meeting constraint.
-        - Material flow constraint.
-        - Single sourcing constraint.
+        :return: An optimization model.
+        :rtype: grb.Model | gekko.GEKKO
         """
         if self.solver == 'GEKKO':
             for i in range(self.I):
@@ -267,7 +278,7 @@ class SupplyChainSolver:
             for l in range(self.L):
                 self.model.Equation(sum(self.qdc[k][l] for k in range(self.K)) == 1)
 
-            if self.opt_type in ('multi', 'reli'):
+            if self.opt_type == 'reli':
                 for j in range(self.J):
                     terms = [
                         self.model.log(
@@ -298,7 +309,7 @@ class SupplyChainSolver:
                         self.Rc[l] == 1 - self.model.exp(self.model.sum(terms))
                     )
 
-            if self.opt_type in ('multi', 'flex'):
+            if self.opt_type == 'flex':
                 for i in range(self.I):
                     for j in range(self.J):
                         self.model.Equation(
@@ -349,28 +360,32 @@ class SupplyChainSolver:
                 self.model.addConstr(
                     grb.quicksum(
                         self.Qsp[i, j] for j in range(self.J)
-                    ) <= self.Cs[i], name=f"Constraint1_{i}"
+                    ) <= self.Cs[i],
+                    name=f"Constraint1_{i}"
                 )
 
             for j in range(self.J):
                 self.model.addConstr(
                     grb.quicksum(
                         self.Qpd[j, k] for k in range(self.K)
-                    ) <= self.Cp[j] * self.X[j], name=f"Constraint2_{j}"
+                    ) <= self.Cp[j] * self.X[j],
+                    name=f"Constraint2_{j}"
                 )
 
             for k in range(self.K):
                 self.model.addConstr(
                     grb.quicksum(
                         self.Qdc[k, l] for l in range(self.L)
-                    ) <= self.Cd[k] * self.Y[k], name=f"Constraint3_{k}"
+                    ) <= self.Cd[k] * self.Y[k],
+                    name=f"Constraint3_{k}"
                 )
 
             for l in range(self.L):
                 self.model.addConstr(
                     grb.quicksum(
                         self.Qdc[k, l] for k in range(self.K)
-                    ) >= self.D[l] * self.SL[l], name=f"Constraint4_{l}"
+                    ) >= self.D[l] * self.SL[l],
+                    name=f"Constraint4_{l}"
                 )
 
             for j in range(self.J):
@@ -379,7 +394,8 @@ class SupplyChainSolver:
                         self.Qsp[i, j] for i in range(self.I)
                     ) == grb.quicksum(
                         self.Qpd[j, k] for k in range(self.K)
-                    ), name=f"Constraint5_{j}"
+                    ),
+                    name=f"Constraint5_{j}"
                 )
 
             for k in range(self.K):
@@ -388,23 +404,25 @@ class SupplyChainSolver:
                         self.Qpd[j, k] for j in range(self.J)
                     ) == grb.quicksum(
                         self.Qdc[k, l] for l in range(self.L)
-                    ), name=f"Constraint6_{k}"
+                    ),
+                    name=f"Constraint6_{k}"
                 )
 
             for k in range(self.K):
                 for l in range(self.L):
                     self.model.addGenConstrIndicator(
-                        self.qdc[k, l], True, self.Qdc[k, l] >= 1e-1, name=f"Indicator_{k}_{l}"
+                        self.qdc[k, l], True, self.Qdc[k, l] >= 1e-1,
+                        name=f"Indicator_{k}_{l}"
                     )
 
             for l in range(self.L):
                 self.model.addConstr(
                     grb.quicksum(
                         self.qdc[k, l] for k in range(self.K)
-                    ) == 1, name=f"Constraint7_{l}"
+                    ) == 1, name=f"Constraint16_{l}"
                 )
 
-            if self.opt_type in ('multi', 'reli'):
+            if self.opt_type == 'reli':
                 for j in range(self.J):
                     expr = nlfunc.exp(
                         grb.quicksum(
@@ -413,7 +431,10 @@ class SupplyChainSolver:
                             ) for i in range(self.I)
                         )
                     )
-                    self.model.addGenConstrNL(self.Rp[j], self.rp[j] * (1 - expr))
+                    self.model.addGenConstrNL(
+                        self.Rp[j], self.rp[j] * (1 - expr),
+                        name=f"Constraint7_{j}"
+                    )
 
                 for k in range(self.K):
                     expr = nlfunc.exp(
@@ -423,7 +444,10 @@ class SupplyChainSolver:
                             ) for j in range(self.J)
                         )
                     )
-                    self.model.addGenConstrNL(self.Rd[k], self.rd[k] * (1 - expr))
+                    self.model.addGenConstrNL(
+                        self.Rd[k], self.rd[k] * (1 - expr),
+                        name=f"Constraint8_{k}"
+                    )
 
                 for l in range(self.L):
                     expr = nlfunc.exp(
@@ -433,152 +457,199 @@ class SupplyChainSolver:
                             ) for k in range(self.K)
                         )
                     )
-                    self.model.addGenConstrNL(self.Rc[l], 1 - expr)
+                    self.model.addGenConstrNL(
+                        self.Rc[l], 1 - expr,
+                        name=f"Constraint9_{l}"
+                    )
 
-    def generate_objective(self):
+            if self.opt_type == 'flex':
+                for i in range(self.L):
+                    for j in range(self.J):
+                        self.model.addConstr(
+                            self.Fsp[i, j] == self.Dsp[i, j] * self.fs[i] + (1 - self.Dsp[i, j]) * self.fsp[i][j],
+                            name=f"Constraint10_{i}_{j}"
+                        )
+
+                for j in range(self.J):
+                    self.model.addConstr(
+                        self.Fp[j] * grb.quicksum(
+                            self.Qsp[i, j] for i in range(self.I)
+                        ) == grb.quicksum(
+                            self.Qsp[i, j] * self.Fsp[i, j] for i in range(self.I)
+                        ),
+                        name=f"Constraint11_{j}"
+                    )
+
+                for j in range(self.J):
+                    for k in range(self.K):
+                        self.model.addConstr(
+                            self.Fpd[j, k] == self.Dpd[j, k] * self.Fp[j] + (1 - self.Dpd[j, k]) * self.fpd[j][k],
+                            name=f"Constraint12_{j}_{k}"
+                        )
+
+                for k in range(self.K):
+                    self.model.addConstr(
+                        self.Fd[k] * grb.quicksum(
+                            self.Qpd[j, k] for j in range(self.J)
+                        ) == grb.quicksum(
+                            self.Qpd[j, k] * self.Fpd[j, k] for j in range(self.J)
+                        ),
+                        name=f"Constraint13_{k}"
+                    )
+
+                for k in range(self.K):
+                    for l in range(self.L):
+                        self.model.addConstr(
+                            self.Fdc[k, l] == self.Ddc[k, l] * self.Fd[k] + (1 - self.Ddc[k, l]) * self.fdc[k][l],
+                            name=f"Constraint14_{k}_{l}"
+                        )
+
+                for l in range(self.L):
+                    self.model.addConstr(
+                        self.Fc[l] * grb.quicksum(
+                            self.Qdc[k, l] for k in range(self.K)
+                        ) == grb.quicksum(
+                            self.Qdc[k, l] * self.Fdc[k, l] for k in range(self.K)
+                        ),
+                        name=f"Constraint15_{l}"
+                    )
+
+        return self.model
+
+    def generate_objective(self, obj: str = 'min') -> grb.Model | gekko.GEKKO:
         """
         Function of generating optimization objective.
 
-        Costs include:
-        - Fixed costs for activating plants and distribution centers
-        - Transportation costs from suppliers to plants
-        - Transportation costs from plants to distribution centers
-        - Transportation costs from distribution centers to customer zones
+        :param obj: Type of objective (Default: 'min'; Optional: 'min', 'max').
+        :type obj: str
+        :return: An optimization model.
+        :rtype: grb.Model | gekko.GEKKO
         """
-        if self.solver == 'GEKKO':
-            # Intermediate variable
-            fixed_cost_p = self.m.Intermediate(sum(self.FCp[j] * self.X[j] for j in range(self.J)))
-            fixed_cost_dc = self.m.Intermediate(sum(self.FCd[k] * self.Y[k] for k in range(self.K)))
-
-            cost_sp_list = []
-            for i in range(self.I):
-                cost_sp_i = self.m.Intermediate(sum(self.Ssp[i][j] * self.Qsp[i][j] for j in range(self.J)))
-                cost_sp_list.append(cost_sp_i)
-            cost_sp = self.m.Intermediate(sum(cost_sp_list))
-
-            cost_pd_list = []
-            for j in range(self.J):
-                cost_pd_j = self.m.Intermediate(sum(self.Spd[j][k] * self.Qpd[j][k] for k in range(self.K)))
-                cost_pd_list.append(cost_pd_j)
-            cost_pd = self.m.Intermediate(sum(cost_pd_list))
-
-            cost_dc_list = []
-            for k in range(self.K):
-                cost_dc_k = self.m.Intermediate(sum(self.Sdc[k][l] * self.Qdc[k][l] for l in range(self.L)))
-                cost_dc_list.append(cost_dc_k)
-
-            cost_dc = self.m.Intermediate(sum(cost_dc_list))
-
-            # Objective function
-            if self.obj.lower() == 'min':
-                self.m.Minimize(fixed_cost_p + fixed_cost_dc + cost_sp + cost_pd + cost_dc)
-            elif self.obj.lower() == 'max':
-                self.m.Maximize(fixed_cost_p + fixed_cost_dc + cost_sp + cost_pd + cost_dc)
-            else:
-                raise ValueError("Invalid value for 'obj'. "
-                                 "Expected 'min' or 'max', but got '{}'.".format(self.obj))
-        else:
-            if self.obj.lower() == 'min':
-                self.model.setObjective(
-                    grb.quicksum(
-                        self.FCp[j] * self.X[j] for j in range(self.J)
-                    ) + grb.quicksum(
-                        self.FCd[k] * self.Y[k] for k in range(self.K)
-                    ) + grb.quicksum(
-                        self.Ssp[i][j] * self.Qsp[i, j] for i in range(self.I) for j in range(self.J)
-                    ) + grb.quicksum(
-                        self.Spd[j][k] * self.Qpd[j, k] for j in range(self.J) for k in range(self.K)
-                    ) + grb.quicksum(
-                        self.Sdc[k][l] * self.Qdc[k, l] for k in range(self.K) for l in range(self.L)
-                    ), grb.GRB.MINIMIZE
-                )
-            elif self.obj.lower() == 'max':
-                self.model.setObjective(
-                    grb.quicksum(
-                        self.FCp[j] * self.X[j] for j in range(self.J)
-                    ) + grb.quicksum(
-                        self.FCd[k] * self.Y[k] for k in range(self.K)
-                    ) + grb.quicksum(
-                        self.Ssp[i][j] * self.Qsp[i, j] for i in range(self.I) for j in range(self.J)
-                    ) + grb.quicksum(
-                        self.Spd[j][k] * self.Qpd[j, k] for j in range(self.J) for k in range(self.K)
-                    ) + grb.quicksum(
-                        self.Sdc[k][l] * self.Qdc[k, l] for k in range(self.K) for l in range(self.L)
-                    ), grb.GRB.MAXIMIZE
-                )
-            else:
-                raise ValueError("Invalid value for 'obj'. "
-                                 "Expected 'min' or 'max', but got '{}'.".format(self.obj))
-
-    def solve(self):
-        """
-        Solves the optimization problem using the GEKKO solver.
-        """
-        if self.solver == 'GEKKO':
-            self.m.solve()
-        else:
-            self.model.optimize()
-
-
-class ReliabilityOptimization:
-
-    def set_equations(self):
-        """
-        Function of setting up the constraints for the cost optimization model.
-
-        Constraints include:
-        - Supplier capacity constraint.
-        - Plant capacity constraint.
-        - DC capacity constraint.
-        - Demand meeting constraint.
-        - Material flow constraint.
-        - Single sourcing constraint.
-        - Reliability computation
-        """
-        # Constraint 1
-        for i in range(self.I):
-            self.m.Equation(sum(self.Qsp[i][j] for j in range(self.J)) <= self.Cs[i])
-
-        # Constraint 2
-        for j in range(self.J):
-            self.m.Equation(sum(self.Qpd[j][k] for k in range(self.K)) <= self.Cp[j] * self.X[j])
-
-        # Constraint 3
-        for k in range(self.K):
-            self.m.Equation(sum(self.Qdc[k][l] for l in range(self.L)) <= self.Cd[k] * self.Y[k])
-
-        # Constraint 4
-        for l in range(self.L):
-            self.m.Equation(sum(self.Qdc[k][l] for k in range(self.K)) >= self.D[l] * self.SL[l])
-
-        # Constraint 5
-        for j in range(self.J):
-            self.m.Equation(sum(self.Qsp[i][j] for i in range(self.I)) == sum(self.Qpd[j][k] for k in range(self.K)))
-        for k in range(self.K):
-            self.m.Equation(sum(self.Qpd[j][k] for j in range(self.J)) == sum(self.Qdc[k][l] for l in range(self.L)))
-
-        # Constraint 6
-        for l in range(self.L):
-            self.m.Equation(sum(self.qdc[k][l] for k in range(self.K)) == 1)
-
-        # Constraint 7
-
-
-    def generate_objective(self):
-        """
-        Function of generating objective function.
-        """
-        if self.obj.lower() == 'min':
-            self.m.Obj(self.m.sum(self.Rc))
-        elif self.obj.lower() == 'max':
-            self.m.Obj(-self.m.sum(self.Rc))
-        else:
+        if obj.lower() not in ('min', 'max'):
             raise ValueError("Invalid value for 'obj'. "
                              "Expected 'min' or 'max', but got '{}'.".format(self.obj))
 
-    def solve(self):
-        """
-        Function of solving the reliability optimization based on GEKKO.
-        """
-        self.m.solve()
+        if self.solver == 'GEKKO':
+            if self.opt_type == 'cost':
+                # Intermediate variable
+                fixed_cost_p = self.model.Intermediate(
+                    sum(self.FCp[j] * self.X[j] for j in range(self.J))
+                )
+                fixed_cost_dc = self.model.Intermediate(
+                    sum(self.FCd[k] * self.Y[k] for k in range(self.K))
+                )
 
+                cost_sp_list = []
+                for i in range(self.I):
+                    cost_sp_i = self.model.Intermediate(
+                        sum(self.Ssp[i][j] * self.Qsp[i][j] for j in range(self.J))
+                    )
+                    cost_sp_list.append(cost_sp_i)
+                cost_sp = self.model.Intermediate(sum(cost_sp_list))
+
+                cost_pd_list = []
+                for j in range(self.J):
+                    cost_pd_j = self.model.Intermediate(
+                        sum(self.Spd[j][k] * self.Qpd[j][k] for k in range(self.K))
+                    )
+                    cost_pd_list.append(cost_pd_j)
+                cost_pd = self.model.Intermediate(sum(cost_pd_list))
+
+                cost_dc_list = []
+                for k in range(self.K):
+                    cost_dc_k = self.model.Intermediate(
+                        sum(self.Sdc[k][l] * self.Qdc[k][l] for l in range(self.L))
+                    )
+                    cost_dc_list.append(cost_dc_k)
+
+                cost_dc = self.model.Intermediate(sum(cost_dc_list))
+
+                # Objective function
+                if obj.lower() == 'min':
+                    self.model.Minimize(fixed_cost_p + fixed_cost_dc + cost_sp + cost_pd + cost_dc)
+                else:
+                    self.model.Maximize(fixed_cost_p + fixed_cost_dc + cost_sp + cost_pd + cost_dc)
+
+            elif self.opt_type == 'reli':
+                if obj == 'min':
+                    self.model.Minimize(sum(self.Rc))
+                else:
+                    self.model.Maximize(sum(self.Rc))
+
+            else:
+                if obj == 'min':
+                    self.model.Minimize(sum(self.Fc))
+                else:
+                    self.model.Maximize(sum(self.Fc))
+
+        else:
+            if self.opt_type == 'cost':
+                if obj.lower() == 'min':
+                    self.model.setObjective(
+                        grb.quicksum(
+                            self.FCp[j] * self.X[j] for j in range(self.J)
+                        ) + grb.quicksum(
+                            self.FCd[k] * self.Y[k] for k in range(self.K)
+                        ) + grb.quicksum(
+                            self.Ssp[i][j] * self.Qsp[i, j] for i in range(self.I) for j in range(self.J)
+                        ) + grb.quicksum(
+                            self.Spd[j][k] * self.Qpd[j, k] for j in range(self.J) for k in range(self.K)
+                        ) + grb.quicksum(
+                            self.Sdc[k][l] * self.Qdc[k, l] for k in range(self.K) for l in range(self.L)
+                        ),
+                        grb.GRB.MINIMIZE
+                    )
+                else:
+                    self.model.setObjective(
+                        grb.quicksum(
+                            self.FCp[j] * self.X[j] for j in range(self.J)
+                        ) + grb.quicksum(
+                            self.FCd[k] * self.Y[k] for k in range(self.K)
+                        ) + grb.quicksum(
+                            self.Ssp[i][j] * self.Qsp[i, j] for i in range(self.I) for j in range(self.J)
+                        ) + grb.quicksum(
+                            self.Spd[j][k] * self.Qpd[j, k] for j in range(self.J) for k in range(self.K)
+                        ) + grb.quicksum(
+                            self.Sdc[k][l] * self.Qdc[k, l] for k in range(self.K) for l in range(self.L)
+                        ),
+                        grb.GRB.MAXIMIZE
+                    )
+            elif self.opt_type == 'reli':
+                if obj == 'min':
+                    self.model.setObjective(
+                        grb.quicksum(self.Rc) / self.L,
+                        grb.GRB.MINIMIZE
+                    )
+                else:
+                    self.model.setObjective(
+                        grb.quicksum(self.Rc) / self.L,
+                        grb.GRB.MAXIMIZE
+                    )
+
+            else:
+                if obj == 'min':
+                    self.model.setObjective(
+                        grb.quicksum(self.Fc) / self.L,
+                        grb.GRB.MINIMIZE
+                    )
+                else:
+                    self.model.setObjective(
+                        grb.quicksum(self.Fc) / self.L,
+                        grb.GRB.MAXIMIZE
+                    )
+
+        return self.model
+
+    def solve(self) -> grb.Model | gekko.GEKKO:
+        """
+        Solves the optimization problem using the GEKKO solver.
+
+        :return: An optimization model.
+        :rtype: grb.Model | gekko.GEKKO
+        """
+        if self.solver == 'GEKKO':
+            self.model.solve()
+        else:
+            self.model.optimize()
+
+        return self.model
