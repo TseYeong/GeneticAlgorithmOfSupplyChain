@@ -1,11 +1,18 @@
 import pandas as pd
 from gekko import GEKKO
 import gurobipy as grb
+from gurobipy import nlfunc
+import os
+import warnings
 
 
-class CostOptimization:
+class InstanceWarning(Warning):
+    pass
+
+
+class SupplyChainSolver:
     """
-    A class for solving the supply chain cost optimization problem.
+    A class for solving the supply chain optimization problem.
 
     Attributes:
         I (int): Number of suppliers.
@@ -20,38 +27,41 @@ class CostOptimization:
         Qsp (list of lists): Decision variables for quantities shipped from suppliers to plants.
         Qpd (list of lists): Decision variables for quantities shipped from plants to distribution centers.
         Qdc (list of lists): Decision variables for quantities shipped from DCs to customer zones.
+        qsp (list of lists): Binary decision variables indicating whether a supplier is active for a plant.
+        qpd (list of lists): Binary decision variables indicating whether a plant is active for a DC.
         qdc (list of lists): Binary decision variables indicating whether a DC is active for a CZ.
         X (list): Binary decision variables for activating plants.
         Y (list): Binary decision variables for activating distribution centers
     """
-    def __init__(self, instance: str, obj: str = 'min', solver: str = 'GEKKO'):
+    def __init__(self, instance: str, opt_type: str = 'multi', solver: str = 'Gurobi'):
         """
         Initialization function.
 
         :param instance: A string representing the name of current instance.
         :type instance: str
-        :param obj: Objective (min, max).
-        :type obj: str
-        :param solver: The selected solver (Default: GEKKO, Option: GEKKO, Gurobi)
+        :param opt_type: Optimization problem type (Default: 'multi'; Optional: 'cost', 'reli', 'flex', 'multi')
+        :type opt_type: str
+        :param solver: The selected solver (Default: 'Gurobi', Option: 'GEKKO', 'Gurobi')
         :type solver: str
         """
-        self.instance = instance
-        self.obj = obj
-        self.solver = solver
+        if opt_type not in ('multi', 'cost', 'reli', 'flex'):
+            raise ValueError("Invalid value for 'opt_type'. "
+                             "Expected 'cost', 'reli', 'flex' or 'multi', but got '{}'.".format(self.obj))
 
-        df_faci_params = pd.read_csv(f"instances/{self.instance}/facilities_params_{self.instance}.csv")
-        df_stage1 = pd.read_csv(f"instances/{self.instance}/sup2pla_cost_{self.instance}.csv")
-        df_stage2 = pd.read_csv(f"instances/{self.instance}/pla2dc_cost_{self.instance}.csv")
-        df_stage3 = pd.read_csv(f"instances/{self.instance}/dc2cz_cost_{self.instance}.csv")
-
-        if solver == 'GEKKO':
-            self.m = GEKKO(remote=True)
-            self.m.options.MAX_MEMORY = 5
-        elif solver == 'Gurobi':
-            self.model = grb.Model(name="CostOptimization")
-        else:
+        if solver not in ('GEKKO', 'Gurobi'):
             raise ValueError("Invalid value for 'solver'. "
                              "Expected 'GEKKO' or 'Gurobi', but got '{}'.".format(self.obj))
+
+        self.instance = instance
+        self.opt_type = opt_type
+        self.solver = solver
+
+        root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+        df_faci_params = pd.read_csv(f"{root_path}/instances/{self.instance}/facilities_params_{self.instance}.csv")
+        df_stage1 = pd.read_csv(f"{root_path}/instances/{self.instance}/sup2pla_cost_{self.instance}.csv")
+        df_stage2 = pd.read_csv(f"{root_path}/instances/{self.instance}/pla2dc_cost_{self.instance}.csv")
+        df_stage3 = pd.read_csv(f"{root_path}/instances/{self.instance}/dc2cz_cost_{self.instance}.csv")
 
         # Number of facilities
         self.I = int(df_faci_params['sup_cap'].count())  # Number of suppliers
@@ -66,30 +76,151 @@ class CostOptimization:
         self.D = list(map(int, df_stage3.iloc[-2].to_list()))  # Demand at customer zones
         self.SL = [float(x.strip('%')) / 100 for x in df_stage3.iloc[-1].to_list()]  # Service level at customer zones
 
+        self.rs = df_faci_params['sup_reli'].to_list()  # Reliability index of suppliers.
+        self.rp = df_faci_params['pla_reli'].dropna().to_list()  # Reliability index of plants.
+        self.rd = df_faci_params['dc_reli'].dropna().to_list()  # Reliability index of distribution centers.
+        self.fs = df_faci_params['sup_flex'].to_list()  # Flexibility index of suppliers.
+
         # Fixed cost
-        self.FCp = df_faci_params['Pla_Fix_Cost'].dropna().to_list()
-        self.FCd = df_faci_params['DC_Fix_Cost'].dropna().to_list()
+        self.FCp = df_faci_params['pla_cost'].dropna().to_list()
+        self.FCd = df_faci_params['dc_cost'].dropna().to_list()
 
         # Shipping cost
         self.Ssp = [[float(x.split(',')[0]) for x in df_stage1.iloc[i]] for i in range(self.I)]
         self.Spd = [[float(x.split(',')[0]) for x in df_stage2.iloc[j]] for j in range(self.J)]
         self.Sdc = [[float(x.split(',')[0]) for x in df_stage3.iloc[k]] for k in range(self.K)]
 
-        # Initialize variables
+        # Reliability of arc
+        self.rsp = [[float(x.split(',')[1]) for x in df_stage1.iloc[i]] for i in range(self.I)]
+        self.rpd = [[float(x.split(',')[1]) for x in df_stage2.iloc[j]] for j in range(self.J)]
+        self.rdc = [[float(x.split(',')[1]) for x in df_stage3.iloc[k]] for k in range(self.K)]
+
+        # Volume flexibility of link
+        self.fsp = [[float(x.split(',')[2]) for x in df_stage1.iloc[i]] for i in range(self.I)]
+        self.fpd = [[float(x.split(',')[2]) for x in df_stage2.iloc[j]] for j in range(self.J)]
+        self.fdc = [[float(x.split(',')[2]) for x in df_stage3.iloc[k]] for k in range(self.K)]
+
         if solver == 'GEKKO':
-            self.Qsp = [[self.m.Var(lb=0, integer=True) for _ in range(self.J)] for _ in range(self.I)]
-            self.Qpd = [[self.m.Var(lb=0, integer=True) for _ in range(self.K)] for _ in range(self.J)]
-            self.Qdc = [[self.m.Var(lb=0, integer=True) for _ in range(self.L)] for _ in range(self.K)]
-            self.qdc = [[self.m.Var(lb=0, ub=1, integer=True) for _ in range(self.L)] for _ in range(self.K)]
-            self.X = [self.m.Var(lb=0, ub=1, integer=True) for _ in range(self.J)]
-            self.Y = [self.m.Var(lb=0, ub=1, integer=True) for _ in range(self.K)]
-        else:
+            warnings.warn(
+                "GEKKO is an open source optimization package with less "
+                "solution performance and convergence than Gurobi. ",
+                InstanceWarning
+            )
+            self.model = GEKKO(remote=True)
+            self.model.options.MAX_MEMORY = 5
+
+            # Variables
+            self.Qsp = [[self.model.Var(lb=0, integer=True) for _ in range(self.J)] for _ in range(self.I)]
+            self.Qpd = [[self.model.Var(lb=0, integer=True) for _ in range(self.K)] for _ in range(self.J)]
+            self.Qdc = [[self.model.Var(lb=0, integer=True) for _ in range(self.L)] for _ in range(self.K)]
+            self.v0 = self.model.Const(0)
+            self.v1 = self.model.Const(1)
+            self.qdc = [
+                [
+                    self.model.if3(
+                        self.Qdc[k][l] - 1e-6, self.v0, self.v1
+                    ) for l in range(self.L)
+                ] for k in range(self.K)
+            ]
+            self.X = [self.model.Var(lb=0, ub=1, integer=True) for _ in range(self.J)]
+            self.Y = [self.model.Var(lb=0, ub=1, integer=True) for _ in range(self.K)]
+
+            if opt_type in ('multi', 'reli'):
+                self.Rp = [self.model.Var(lb=0, ub=1, integer=False) for _ in range(self.J)]
+                self.Rd = [self.model.Var(lb=0, ub=1, integer=False) for _ in range(self.K)]
+                self.Rc = [self.model.Var(lb=0, ub=1, integer=False) for _ in range(self.L)]
+                self.qsp = [
+                    [
+                        self.model.if3(
+                            self.Qsp[i][j] - 1e-6, self.v0, self.v1
+                        ) for j in range(self.J)
+                    ] for i in range(self.I)
+                ]
+                self.qpd = [
+                    [
+                        self.model.if3(
+                            self.Qpd[j][k] - 1e-6, self.v0, self.v1
+                        ) for k in range(self.K)
+                    ] for j in range(self.J)
+                ]
+
+            if opt_type in ('multi', 'flex'):
+                self.Dsp = [
+                    [
+                        self.model.if3(
+                            self.fs[i] - self.fsp[i][j], self.v0, self.v1
+                        ) for j in range(self.J)
+                    ] for i in range(self.I)
+                ]
+                self.Fsp = [
+                    [
+                        self.model.Var(
+                            lb=0, ub=1, integer=False
+                        ) for _ in range(self.J)
+                    ] for _ in range(self.I)
+                ]
+                self.Fp = [self.model.Var(lb=0, ub=1, integer=False) for _ in range(self.J)]
+
+                self.Dpd = [
+                    [
+                        self.model.if3(
+                            self.fpd[j][k] - self.Fp[j], self.v0, self.v1
+                        ) for k in range(self.K)
+                    ] for j in range(self.J)
+                ]
+                self.Fpd = [
+                    [
+                        self.model.Var(
+                            lb=0, ub=1, integer=False
+                        ) for _ in range(self.K)
+                    ] for _ in range(self.J)
+                ]
+                self.Fd = [self.model.Var(lb=0, ub=1, integer=False) for _ in range(self.K)]
+
+                self.Ddc = [
+                    [
+                        self.model.if3(
+                            self.fdc[k][l] - self.Fd[k], self.v0, self.v1
+                        ) for l in range(self.L)
+                    ] for k in range(self.K)
+                ]
+                self.Fdc = [
+                    [
+                        self.model.Var(
+                            lb=0, ub=1, integer=False
+                        ) for _ in range(self.L)
+                    ] for _ in range(self.K)
+                ]
+                self.Fc = [self.model.Var(lb=0, ub=1, integer=False) for _ in range(self.L)]
+
+        elif solver == 'Gurobi':
+            self.model = grb.Model(name="CostOptimization")
+
+            # Variables
             self.Qsp = self.model.addVars(self.I, self.J, lb=0, vtype=grb.GRB.INTEGER, name='Qsp')
             self.Qpd = self.model.addVars(self.J, self.K, lb=0, vtype=grb.GRB.INTEGER, name='Qpd')
             self.Qdc = self.model.addVars(self.K, self.L, lb=0, vtype=grb.GRB.INTEGER, name='Qdc')
             self.qdc = self.model.addVars(self.K, self.L, vtype=grb.GRB.BINARY, name='qdc')
             self.X = self.model.addVars(self.J, vtype=grb.GRB.BINARY, name='X')
             self.Y = self.model.addVars(self.K, vtype=grb.GRB.BINARY, name='Y')
+
+            if opt_type in ('multi', 'reli'):
+                self.qsp = self.model.addVars(self.I, self.J, vtype=grb.GRB.BINARY, name='qsp')
+                self.qpd = self.model.addVars(self.J, self.K, vtype=grb.GRB.BINARY, name='qpd')
+                self.Rp = self.model.addVars(self.J, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Rp')
+                self.Rd = self.model.addVars(self.K, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Rd')
+                self.Rc = self.model.addVars(self.L, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Rc')
+
+            if opt_type in ('multi', 'flex'):
+                self.Dsp = self.model.addVars(self.I, self.J, vtype=grb.GRB.BINARY, name='Dsp')
+                self.Dpd = self.model.addVars(self.J, self.K, vtype=grb.GRB.BINARY, name='Dpd')
+                self.Ddc = self.model.addVars(self.K, self.L, vtype=grb.GRB.BINARY, name='Ddc')
+                self.Fsp = self.model.addVars(self.I, self.J, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fsp')
+                self.Fpd = self.model.addVars(self.J, self.K, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fpd')
+                self.Fdc = self.model.addVars(self.K, self.L, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fdc')
+                self.Fp = self.model.addVars(self.J, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fp')
+                self.Fd = self.model.addVars(self.K, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fd')
+                self.Fc = self.model.addVars(self.L, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fc')
 
     def set_equations(self):
         """
@@ -104,38 +235,114 @@ class CostOptimization:
         - Single sourcing constraint.
         """
         if self.solver == 'GEKKO':
-            # Constraint 1
             for i in range(self.I):
-                self.m.Equation(sum(self.Qsp[i][j] for j in range(self.J)) <= self.Cs[i])
+                self.model.Equation(sum(self.Qsp[i][j] for j in range(self.J)) <= self.Cs[i])
 
-            # Constraint 2
             for j in range(self.J):
-                self.m.Equation(sum(self.Qpd[j][k] for k in range(self.K)) <= self.Cp[j] * self.X[j])
+                self.model.Equation(sum(self.Qpd[j][k] for k in range(self.K)) <= self.Cp[j] * self.X[j])
 
-            # Constraint 3
             for k in range(self.K):
-                self.m.Equation(sum(self.Qdc[k][l] for l in range(self.L)) <= self.Cd[k] * self.Y[k])
+                self.model.Equation(sum(self.Qdc[k][l] for l in range(self.L)) <= self.Cd[k] * self.Y[k])
 
-            # Constraint 4
             for l in range(self.L):
-                self.m.Equation(sum(self.Qdc[k][l] for k in range(self.K)) >= self.D[l] * self.SL[l])
+                self.model.Equation(sum(self.Qdc[k][l] for k in range(self.K)) >= self.D[l] * self.SL[l])
 
-            # Constraint 5
             for j in range(self.J):
-                self.m.Equation(sum(self.Qsp[i][j] for i in range(self.I)) == sum(self.Qpd[j][k] for k in range(self.K)))
+                self.model.Equation(
+                    sum(
+                        self.Qsp[i][j] for i in range(self.I)
+                    ) == sum(
+                        self.Qpd[j][k] for k in range(self.K)
+                    )
+                )
             for k in range(self.K):
-                self.m.Equation(sum(self.Qpd[j][k] for j in range(self.J)) == sum(self.Qdc[k][l] for l in range(self.L)))
+                self.model.Equation(
+                    sum(
+                        self.Qpd[j][k] for j in range(self.J)
+                    ) == sum(
+                        self.Qdc[k][l] for l in range(self.L)
+                    )
+                )
 
-            # Constraint 6
             for l in range(self.L):
-                self.m.Equation(sum(self.qdc[k][l] for k in range(self.K)) == 1)
-            # Logic constraint
-            upper = 500
-            lower = 100
-            for k in range(self.K):
+                self.model.Equation(sum(self.qdc[k][l] for k in range(self.K)) == 1)
+
+            if self.opt_type in ('multi', 'reli'):
+                for j in range(self.J):
+                    terms = [
+                        self.model.log(
+                            1 - self.qsp[i][j] * self.rsp[i][j] * self.rs[i] + 1e-6
+                        ) for i in range(self.I)
+                    ]
+                    self.model.Equation(
+                        self.Rp[j] == self.rp[j] * (1 - self.model.exp(self.model.sum(terms)))
+                    )
+
+                for k in range(self.K):
+                    terms = [
+                        self.model.log(
+                            1 - self.qpd[j][k] * self.rpd[j][k] * self.Rp[j] + 1e-6
+                        ) for j in range(self.J)
+                    ]
+                    self.model.Equation(
+                        self.Rd[k] == self.rd[k] * (1 - self.model.exp(self.model.sum(terms)))
+                    )
+
                 for l in range(self.L):
-                    self.m.Equation(self.Qdc[k][l] <= upper * self.qdc[k][l])
-                    self.m.Equation(self.Qdc[k][l] >= lower * self.qdc[k][l])
+                    terms = [
+                        self.model.log(
+                            1 - self.qdc[k][l] * self.rdc[k][l] * self.Rd[k] + 1e-6
+                        ) for k in range(self.K)
+                    ]
+                    self.model.Equation(
+                        self.Rc[l] == 1 - self.model.exp(self.model.sum(terms))
+                    )
+
+            if self.opt_type in ('multi', 'flex'):
+                for i in range(self.I):
+                    for j in range(self.J):
+                        self.model.Equation(
+                            self.Fsp[i][j] == self.Dsp[i][j] * self.fs[i] + (1 - self.Dsp[i][j]) * self.fsp[i][j]
+                        )
+
+                for j in range(self.J):
+                    self.model.Equation(
+                        self.Fp[j] * sum(
+                            self.Qsp[i][j] for i in range(self.I)
+                        ) == sum(
+                            self.Qsp[i][j] * self.Fsp[i][j] for i in range(self.I)
+                        )
+                    )
+
+                for j in range(self.J):
+                    for k in range(self.K):
+                        self.model.Equation(
+                            self.Fpd[j][k] == self.Dpd[j][k] * self.Fp[j] + (1 - self.Dpd[j][k]) * self.fpd[j][k]
+                        )
+
+                for k in range(self.K):
+                    self.model.Equation(
+                        self.Fd[k] * sum(
+                            self.Qpd[j][k] for j in range(self.J)
+                        ) == sum(
+                            self.Qpd[j][k] * self.Fpd[j][k] for j in range(self.J)
+                        )
+                    )
+
+                for k in range(self.K):
+                    for l in range(self.L):
+                        self.model.Equation(
+                            self.Fdc[k][l] == self.Ddc[k][l] * self.Fd[k] + (1 - self.Ddc[k][l]) * self.fdc[k][l]
+                        )
+
+                for l in range(self.L):
+                    self.model.Equation(
+                        self.Fc[l] * sum(
+                            self.Qdc[k][l] for k in range(self.K)
+                        ) == sum(
+                            self.Qdc[k][l] * self.Fdc[k][l] for k in range(self.K)
+                        )
+                    )
 
         else:
             for i in range(self.I):
@@ -163,7 +370,7 @@ class CostOptimization:
                 self.model.addConstr(
                     grb.quicksum(
                         self.Qdc[k, l] for k in range(self.K)
-                    ) == self.D[l] * self.SL[l], name=f"Constraint4_{l}"
+                    ) >= self.D[l] * self.SL[l], name=f"Constraint4_{l}"
                 )
 
             for j in range(self.J):
@@ -186,12 +393,47 @@ class CostOptimization:
 
             for k in range(self.K):
                 for l in range(self.L):
-                    self.model.addConstr(
-                        self.Qdc[k, l] <= 500 * self.qdc[k, l], name=f"BigM_{k}_{l}"
+                    self.model.addGenConstrIndicator(
+                        self.qdc[k, l], True, self.Qdc[k, l] >= 1e-1, name=f"Indicator_{k}_{l}"
                     )
-                    self.model.addConstr(
-                        self.Qdc[k, l] >= 100 * self.qdc[k, l], name=f"NonNegative_{k}_{l}"
+
+            for l in range(self.L):
+                self.model.addConstr(
+                    grb.quicksum(
+                        self.qdc[k, l] for k in range(self.K)
+                    ) == 1, name=f"Constraint7_{l}"
+                )
+
+            if self.opt_type in ('multi', 'reli'):
+                for j in range(self.J):
+                    expr = nlfunc.exp(
+                        grb.quicksum(
+                            nlfunc.log(
+                                1 - self.qsp[i, j] * self.rsp[i][j] * self.rs[i] + 1e-6
+                            ) for i in range(self.I)
+                        )
                     )
+                    self.model.addGenConstrNL(self.Rp[j], self.rp[j] * (1 - expr))
+
+                for k in range(self.K):
+                    expr = nlfunc.exp(
+                        grb.quicksum(
+                            nlfunc.log(
+                                1 - self.qpd[j, k] * self.rpd[j][k] * self.Rp[j] + 1e-6
+                            ) for j in range(self.J)
+                        )
+                    )
+                    self.model.addGenConstrNL(self.Rd[k], self.rd[k] * (1 - expr))
+
+                for l in range(self.L):
+                    expr = nlfunc.exp(
+                        grb.quicksum(
+                            nlfunc.log(
+                                1 - self.qdc[k, l] * self.rdc[k][l] * self.Rd[k] + 1e-6
+                            ) for k in range(self.K)
+                        )
+                    )
+                    self.model.addGenConstrNL(self.Rc[l], 1 - expr)
 
     def generate_objective(self):
         """
@@ -280,68 +522,6 @@ class CostOptimization:
 
 class ReliabilityOptimization:
 
-    def __init__(self, df_faci_params: pd.DataFrame, df_stage1: pd.DataFrame,
-                 df_stage2: pd.DataFrame, df_stage3: pd.DataFrame, obj: str = 'min'):
-        """
-        Initialization function.
-
-        :param df_faci_params: A DataFrame containing the parameters of each facility.
-        :type df_faci_params: pd.DataFrame
-        :param df_stage1: A DataFrame containing the shipping parameters between suppliers and plants.
-        :type df_stage1: pd.DataFrame
-        :param df_stage2: A DataFrame containing the shipping parameters between plants and distribution centers.
-        :type df_stage2: pd.DataFrame
-        :param df_stage3: A DataFrame containing the shipping parameters between distribution centers and customer zones.
-        :type df_stage3: pd.DataFrame
-        :param obj: Objective (min, max).
-        :type obj: str
-        """
-        self.df_faci_params = df_faci_params
-        self.df_stage1 = df_stage1
-        self.df_stage2 = df_stage2
-        self.df_stage3 = df_stage3
-        self.obj = obj
-
-        self.m = GEKKO(remote=True)
-        self.m.options.MAX_MEMORY = 5
-
-        # Number of facilities
-        self.I = df_faci_params['sup_cap'].count()  # Number of suppliers
-        self.J = df_faci_params['pla_cap'].notna().sum()  # Number of plants
-        self.K = df_faci_params['dc_cap'].notna().sum()  # Number of distribution centers
-        self.L = df_stage3.shape[1]  # Number of customer zones
-
-        # Constant parameters
-        self.Cs = df_faci_params['Sup_Cap'].to_list()  # Capacity of suppliers
-        self.Cp = df_faci_params['Pla_Cap'].dropna().to_list()  # Capacity of plants
-        self.Cd = df_faci_params['DC_Cap'].dropna().to_list()  # Capacity of distribution centers
-        self.D = list(map(int, df_stage3.iloc[-2].to_list()))  # Demand at customer zones
-        self.SL = [float(x.strip('%')) / 100 for x in df_stage3.iloc[-1].to_list()]  # Service level at customer zones
-
-        self.rs = df_faci_params['sup_reli'].to_list()  # Reliability index of suppliers.
-        self.rp = df_faci_params['pla_reli'].dropna().to_list()  # Reliability index of plants.
-        self.rd = df_faci_params['dc_reli'].dropna().to_list()  # Reliability index of distribution centers.
-
-        # Reliability of arc
-        self.rsp = [[float(x.split(',')[1]) for x in df_stage1.iloc[i]] for i in range(self.I)]
-        self.rpd = [[float(x.split(',')[1]) for x in df_stage2.iloc[j]] for j in range(self.J)]
-        self.rdc = [[float(x.split(',')[1]) for x in df_stage3.iloc[k]] for k in range(self.K)]
-
-        # Initialize variables
-        self.Qsp = [[self.m.Var(lb=0, integer=True) for _ in range(self.J)] for _ in range(self.I)]
-        self.Qpd = [[self.m.Var(lb=0, integer=True) for _ in range(self.K)] for _ in range(self.J)]
-        self.Qdc = [[self.m.Var(lb=0, integer=True) for _ in range(self.L)] for _ in range(self.K)]
-        self.qsp = [[self.m.Var(lb=0, ub=1, integer=True) for _ in range(self.J)] for _ in range(self.I)]
-        self.qpd = [[self.m.Var(lb=0, ub=1, integer=True) for _ in range(self.K)] for _ in range(self.J)]
-        self.qdc = [[self.m.Var(lb=0, ub=1, integer=True) for _ in range(self.L)] for _ in range(self.K)]
-
-        self.X = [self.m.Var(lb=0, ub=1, integer=True) for _ in range(self.J)]
-        self.Y = [self.m.Var(lb=0, ub=1, integer=True) for _ in range(self.K)]
-
-        self.Rp = [self.m.Var(lb=0, ub=1, integer=False) for _ in range(self.J)]
-        self.Rd = [self.m.Var(lb=0, ub=1, integer=False) for _ in range(self.K)]
-        self.Rc = [self.m.Var(lb=0, ub=1, integer=False) for _ in range(self.L)]
-
     def set_equations(self):
         """
         Function of setting up the constraints for the cost optimization model.
@@ -380,37 +560,9 @@ class ReliabilityOptimization:
         # Constraint 6
         for l in range(self.L):
             self.m.Equation(sum(self.qdc[k][l] for k in range(self.K)) == 1)
-        # Logic constraint
-        lower = 100
-        sp_pd_upper = sum(self.D)
-        for i in range(self.I):
-            for j in range(self.J):
-                self.m.Equation(self.Qsp[i][j] <= sp_pd_upper * self.qsp[i][j])
-                self.m.Equation(self.Qsp[i][j] >= lower * self.qsp[i][j])
-
-        for j in range(self.J):
-            for k in range(self.K):
-                self.m.Equation(self.Qpd[j][k] <= sp_pd_upper * self.qpd[j][k])
-                self.m.Equation(self.Qpd[j][k] >= lower * self.qpd[j][k])
-
-        dc_upper = 500
-        for k in range(self.K):
-            for l in range(self.L):
-                self.m.Equation(self.Qdc[k][l] <= dc_upper * self.qdc[k][l])
-                self.m.Equation(self.Qdc[k][l] >= lower * self.qdc[k][l])
 
         # Constraint 7
-        for j in range(self.J):
-            terms = [self.m.log(1 - self.qsp[i][j] * self.rsp[i][j] * self.rs[i] + 1e-6) for i in range(self.I)]
-            self.m.Equation(self.Rp[j] == self.rp[j] * (1 - self.m.exp(self.m.sum(terms))))
 
-        for k in range(self.K):
-            terms = [self.m.log(1 - self.qpd[j][k] * self.rpd[j][k] * self.Rp[j] + 1e-6) for j in range(self.J)]
-            self.m.Equation(self.Rd[k] == self.rd[k] * (1 - self.m.exp(self.m.sum(terms))))
-
-        for l in range(self.L):
-            terms = [self.m.log(1 - self.qdc[k][l] * self.rdc[k][l] * self.Rd[k] + 1e-6) for k in range(self.K)]
-            self.m.Equation(self.Rc[l] == 1 - self.m.exp(self.m.sum(terms)))
 
     def generate_objective(self):
         """
