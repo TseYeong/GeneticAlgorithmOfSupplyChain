@@ -164,7 +164,7 @@ class SupplyChainSolver:
                 self.Dsp = [
                     [
                         self.model.if3(
-                            self.fs[i] - self.fsp[i][j], self.v0, self.v1
+                            self.fsp[i][j] - self.fs[i], self.v0, self.v1
                         ) for j in range(self.J)
                     ] for i in range(self.I)
                 ]
@@ -238,12 +238,9 @@ class SupplyChainSolver:
                 self.Fd = self.model.addVars(self.K, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fd')
                 self.Fc = self.model.addVars(self.L, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fc')
 
-    def set_equations(self) -> grb.Model | gekko.GEKKO:
+    def set_equations(self):
         """
         Function of setting up the constraints for the cost optimization model.
-
-        :return: An optimization model.
-        :rtype: grb.Model | gekko.GEKKO
         """
         if self.solver == 'GEKKO':
             for i in range(self.I):
@@ -411,8 +408,8 @@ class SupplyChainSolver:
             for k in range(self.K):
                 for l in range(self.L):
                     self.model.addGenConstrIndicator(
-                        self.qdc[k, l], True, self.Qdc[k, l] >= 1e-1,
-                        name=f"Indicator_{k}_{l}"
+                        self.qdc[k, l], True, self.Qdc[k, l] >= 1e-6,
+                        name=f"Indicator_qdc_{k}_{l}"
                     )
 
             for l in range(self.L):
@@ -423,6 +420,20 @@ class SupplyChainSolver:
                 )
 
             if self.opt_type == 'reli':
+                for i in range(self.I):
+                    for j in range(self.J):
+                        self.model.addGenConstrIndicator(
+                            self.qsp[i, j], True, self.Qsp[i, j] >= 1e-6,
+                            name=f"Indicator_qsp_{i}_{j}"
+                        )
+
+                for j in range(self.J):
+                    for k in range(self.K):
+                        self.model.addGenConstrIndicator(
+                            self.qpd[j, k], True, self.Qpd[j, k] >= 1e-6,
+                            name=f"Indicator_qpd_{j}_{k}"
+                        )
+
                 for j in range(self.J):
                     expr = nlfunc.exp(
                         grb.quicksum(
@@ -463,6 +474,28 @@ class SupplyChainSolver:
                     )
 
             if self.opt_type == 'flex':
+
+                for i in range(self.I):
+                    for j in range(self.J):
+                        self.model.addGenConstrIndicator(
+                            self.Dsp[i, j], True, self.fs[i], grb.GRB.GREATER_EQUAL, self.fsp[i][j],
+                            name=f"Constraint_Dsp_{i}_{j}"
+                        )
+
+                for j in range(self.J):
+                    for k in range(self.K):
+                        self.model.addGenConstrIndicator(
+                            self.Dpd[j, k], True, self.Fp[j], grb.GRB.LESS_EQUAL, self.fpd[j][k],
+                            name=f"Constraint_Dpd_{j}_{k}"
+                        )
+
+                for k in range(self.K):
+                    for l in range(self.L):
+                        self.model.addGenConstrIndicator(
+                            self.Ddc[k, l], True, self.Fd[k], grb.GRB.LESS_EQUAL, self.fdc[k][l],
+                            name=f"Constraint_Ddc_{k}_{l}"
+                        )
+
                 for i in range(self.L):
                     for j in range(self.J):
                         self.model.addConstr(
@@ -514,16 +547,14 @@ class SupplyChainSolver:
                         name=f"Constraint15_{l}"
                     )
 
-        return self.model
+        return self
 
-    def generate_objective(self, obj: str = 'min') -> grb.Model | gekko.GEKKO:
+    def generate_objective(self, obj: str = 'min'):
         """
         Function of generating optimization objective.
 
         :param obj: Type of objective (Default: 'min'; Optional: 'min', 'max').
         :type obj: str
-        :return: An optimization model.
-        :rtype: grb.Model | gekko.GEKKO
         """
         if obj.lower() not in ('min', 'max'):
             raise ValueError("Invalid value for 'obj'. "
@@ -638,18 +669,15 @@ class SupplyChainSolver:
                         grb.GRB.MAXIMIZE
                     )
 
-        return self.model
+        return self
 
-    def solve(self) -> grb.Model | gekko.GEKKO:
+    def solve(self):
         """
         Solves the optimization problem using the GEKKO solver.
-
-        :return: An optimization model.
-        :rtype: grb.Model | gekko.GEKKO
         """
         if self.solver == 'GEKKO':
             self.model.solve()
         else:
             self.model.optimize()
 
-        return self.model
+        return self
