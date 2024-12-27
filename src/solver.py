@@ -191,7 +191,7 @@ class SupplyChainSolver:
         for k in range(self.K):
             for l in range(self.L):
                 self.model.addGenConstrIndicator(
-                    self.qdc[k, l], True, self.Qdc[k, l] >= 1e-6,
+                    self.qdc[k, l], True, self.Qdc[k, l] >= 0,
                     name=f"Indicator_qdc_{k}_{l}"
                 )
 
@@ -206,14 +206,14 @@ class SupplyChainSolver:
             for i in range(self.I):
                 for j in range(self.J):
                     self.model.addGenConstrIndicator(
-                        self.qsp[i, j], True, self.Qsp[i, j] >= 1e-6,
+                        self.qsp[i, j], True, self.Qsp[i, j] >= 0,
                         name=f"Indicator_qsp_{i}_{j}"
                     )
 
             for j in range(self.J):
                 for k in range(self.K):
                     self.model.addGenConstrIndicator(
-                        self.qpd[j, k], True, self.Qpd[j, k] >= 1e-6,
+                        self.qpd[j, k], True, self.Qpd[j, k] >= 0,
                         name=f"Indicator_qpd_{j}_{k}"
                     )
 
@@ -221,7 +221,7 @@ class SupplyChainSolver:
                 expr = nlfunc.exp(
                     grb.quicksum(
                         nlfunc.log(
-                            1 - self.qsp[i, j] * self.rsp[i][j] * self.rs[i] + 1e-6
+                            1 - self.qsp[i, j] * self.rsp[i][j] * self.rs[i]
                         ) for i in range(self.I)
                     )
                 )
@@ -234,7 +234,7 @@ class SupplyChainSolver:
                 expr = nlfunc.exp(
                     grb.quicksum(
                         nlfunc.log(
-                            1 - self.qpd[j, k] * self.rpd[j][k] * self.Rp[j] + 1e-6
+                            1 - self.qpd[j, k] * self.rpd[j][k] * self.Rp[j]
                         ) for j in range(self.J)
                     )
                 )
@@ -247,7 +247,7 @@ class SupplyChainSolver:
                 expr = nlfunc.exp(
                     grb.quicksum(
                         nlfunc.log(
-                            1 - self.qdc[k, l] * self.rdc[k][l] * self.Rd[k] + 1e-6
+                            1 - self.qdc[k, l] * self.rdc[k][l] * self.Rd[k]
                         ) for k in range(self.K)
                     )
                 )
@@ -389,6 +389,7 @@ class SupplyChainSolver:
 
         else:
             self.model.setParam('MIPGap', 0.05)
+            self.model.setParam('TimeLimit', 600)
             if obj == 'min':
                 self.model.setObjective(
                     grb.quicksum(self.Fc) / self.L,
