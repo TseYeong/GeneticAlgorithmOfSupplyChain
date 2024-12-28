@@ -93,3 +93,5 @@ class GeneticAlgorithm:
             chosen_index = chromosomes[-1][l] - 1
             Dj[chosen_index] += self.D[l]
 
+
+
