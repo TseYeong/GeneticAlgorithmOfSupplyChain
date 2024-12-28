@@ -4,9 +4,14 @@ import os
 
 
 class GeneticAlgorithm:
-    def __init__(self, instance: str):
+    def __init__(self, instance: str, population: int = 300,
+                 generation: int = 300, cross_p: float = 0.8, mutation_p: float = 0.3):
 
         self.instance = instance
+        self.population = population
+        self.generation = generation
+        self.cross_p = cross_p
+        self.mutation_p = mutation_p
 
         root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         df_faci_params = pd.read_csv(f"{root_path}/instances/{self.instance}/facilities_params_{self.instance}.csv")
@@ -50,3 +55,41 @@ class GeneticAlgorithm:
         self.fsp = [[float(x.split(',')[2]) for x in df_stage1.iloc[i]] for i in range(self.I)]
         self.fpd = [[float(x.split(',')[2]) for x in df_stage2.iloc[j]] for j in range(self.J)]
         self.fdc = [[float(x.split(',')[2]) for x in df_stage3.iloc[k]] for k in range(self.K)]
+
+    def generate_chromosome(self, stage: int) -> list:
+        """
+        Generate chromosome based on the stages.
+
+        :param stage: Stage where chromosome need to be generated.
+        :type stage: int
+        :return: List containing chromosomes.
+        :rtype: list
+        """
+        if stage == 3:
+            chromosomes = [-1] * self.L
+            capacity = self.Cd.copy()
+
+            for l in range(self.L):
+                valid_index = [k for k in range(self.K) if capacity[k] >= self.D[l]]
+                chosen_index = random.choice(valid_index)
+
+                chromosomes[l] = chosen_index + 1
+                capacity[chosen_index] -= self.D[l]
+
+            return chromosomes
+
+        elif stage == 2:
+            num = self.J + self.K
+
+        else:
+            num = self.I + self.J
+
+        return random.sample(range(1, num + 1), num)
+
+    def decode(self, chromosomes: list):
+
+        Dj = [0] * self.K
+        for l in range(self.L):
+            chosen_index = chromosomes[-1][l] - 1
+            Dj[chosen_index] += self.D[l]
+
