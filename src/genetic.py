@@ -1,6 +1,8 @@
 import random
 import pandas as pd
 import os
+from list_tools import Tools
+import numpy as np
 
 
 class GeneticAlgorithm:
@@ -86,6 +88,10 @@ class GeneticAlgorithm:
 
         return random.sample(range(1, num + 1), num)
 
+    def preference_matrix(self):
+
+        pass
+
     def decode(self, chromosomes: list):
 
         Dj = [0] * self.K
@@ -93,5 +99,6 @@ class GeneticAlgorithm:
             chosen_index = chromosomes[-1][l] - 1
             Dj[chosen_index] += self.D[l]
 
-
-
+        index, chromosome = Tools.find_max_value(chromosomes[1])
+        if index >= self.J:  # Entity is DC
+            pass
