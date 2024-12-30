@@ -89,8 +89,39 @@ class GeneticAlgorithm:
         return random.sample(range(1, num + 1), num)
 
     def preference_matrix(self):
+        """
+        Generate preference matrix in stage 1 and 2.
+        :return:
+        :rtype: tuple[list[list[float]], list[list[float]]]
+        """
+        cost = [self.Ssp, self.Spd, self.Sdc]
+        reli = [self.rsp, self.rpd, self.rdc]
+        flex = [self.fsp, self.fpd, self.fdc]
 
-        pass
+        normalized_cost = Tools.normalization(cost)
+        normalized_reli = Tools.normalization(reli)
+        normalized_flex = Tools.normalization(flex)
+
+        Ncsp = normalized_cost[0]
+        Ncpd = normalized_cost[1]
+        Nrsp = normalized_reli[0]
+        Nrpd = normalized_reli[1]
+        Nfsp = normalized_flex[0]
+        Nfpd = normalized_flex[1]
+
+        pre_matrix_sp = [[0.0 for _ in range(self.J)] for _ in range(self.I)]
+        print(pre_matrix_sp[1][1])
+        pre_matrix_pd = [[0.0 for _ in range(self.K)] for _ in range(self.J)]
+
+        for i in range(self.I):
+            for j in range(self.J):
+                pre_matrix_sp[i][j] = Nrsp[i][j] + Nfsp[i][j] - Ncsp[i][j]
+
+        for j in range(self.J):
+            for k in range(self.K):
+                pre_matrix_pd[j][k] = Nrpd[j][k] + Nfpd[j][k] - Ncpd[j][k]
+
+        return pre_matrix_sp, pre_matrix_pd
 
     def decode(self, chromosomes: list):
 
@@ -100,5 +131,7 @@ class GeneticAlgorithm:
             Dj[chosen_index] += self.D[l]
 
         index, chromosome = Tools.find_max_value(chromosomes[1])
+        pre_matrix_sp, pre_matrix_pd = self.preference_matrix()
         if index >= self.J:  # Entity is DC
-            pass
+            dc_index = index - self.J
+            row, pre_value = Tools.find_max_value(np.array(pre_matrix_pd)[:, dc_index].tolist())
