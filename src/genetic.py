@@ -1,8 +1,9 @@
 import random
 import pandas as pd
+import numpy as np
 import os
 from list_tools import Tools
-import numpy as np
+from solver import SupplyChainSolver
 
 
 class GeneticAlgorithm:
@@ -57,6 +58,18 @@ class GeneticAlgorithm:
         self.fsp = [[float(x.split(',')[2]) for x in df_stage1.iloc[i]] for i in range(self.I)]
         self.fpd = [[float(x.split(',')[2]) for x in df_stage2.iloc[j]] for j in range(self.J)]
         self.fdc = [[float(x.split(',')[2]) for x in df_stage3.iloc[k]] for k in range(self.K)]
+
+    def generate_boundary(self, opt_type):
+        """
+        Function of generating the boundary (both upper and lower) of specific optimization type based on Gurobi.
+
+        :param opt_type: Optimization problem type.
+        :type opt_type: str
+        :return: A tuple containing upper and lower boundaries.
+        :rtype: tuple[float, float]
+        """
+        solver = SupplyChainSolver(instance=self.instance, opt_type=opt_type)
+
 
     def generate_chromosome(self, stage: int):
         """
@@ -250,6 +263,9 @@ class GeneticAlgorithm:
 
         return quantity_sp, quantity_pd
 
+    def select(self):
+        pass
+
     def crossover(self, parent1, parent2):
         """
         Crossover operator of the generation.
@@ -267,9 +283,9 @@ class GeneticAlgorithm:
 
             for index, binary in enumerate(segment):
                 if binary:
-                    child.append(parent2[index])
+                    child.append(parent2[index].copy())
                 else:
-                    child.append(parent1[index])
+                    child.append(parent1[index].copy())
 
             return child
 
@@ -289,4 +305,11 @@ class GeneticAlgorithm:
             child = []
             for index, binary in enumerate(segment):
                 if binary:
-                    pass
+                    chromosomes = Tools.element_swap(individual[index])
+                    child.append(chromosomes)
+                else:
+                    child.append(individual[index].copy())
+
+            return child
+
+        return
