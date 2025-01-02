@@ -408,4 +408,4 @@ class SupplyChainSolver:
         Solves the optimization problem using the GEKKO solver.
         """
         self.model.optimize()
-        return self
+        return self.model
