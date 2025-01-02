@@ -6,11 +6,11 @@ import numpy as np
 
 
 class GeneticAlgorithm:
-    def __init__(self, instance: str, population: int = 300,
+    def __init__(self, instance: str, population_size: int = 300,
                  generation: int = 300, cross_p: float = 0.8, mutation_p: float = 0.3):
 
         self.instance = instance
-        self.population = population
+        self.population_size = population_size
         self.generation = generation
         self.cross_p = cross_p
         self.mutation_p = mutation_p
@@ -58,7 +58,7 @@ class GeneticAlgorithm:
         self.fpd = [[float(x.split(',')[2]) for x in df_stage2.iloc[j]] for j in range(self.J)]
         self.fdc = [[float(x.split(',')[2]) for x in df_stage3.iloc[k]] for k in range(self.K)]
 
-    def generate_chromosome(self, stage: int) -> list:
+    def generate_chromosome(self, stage: int):
         """
         Generate chromosome based on the stages.
 
@@ -88,6 +88,24 @@ class GeneticAlgorithm:
 
         return random.sample(range(1, num + 1), num)
 
+    def initialize_population(self):
+        """
+        Initialize the population based on the population size.
+        :return: List of chromosomes of each individual.
+        :rtype: list[list[list[int]]]
+        """
+        populations = []
+        for _ in range(self.population_size):
+            chromosomes_list = [
+                self.generate_chromosome(1),
+                self.generate_chromosome(2),
+                self.generate_chromosome(3)
+            ]
+
+            populations.append(chromosomes_list)
+
+        return populations
+
     def preference_matrix(self):
         """
         Generate preference matrix in stage 1 and 2.
@@ -110,7 +128,6 @@ class GeneticAlgorithm:
         Nfpd = normalized_flex[1]
 
         pre_matrix_sp = [[0.0 for _ in range(self.J)] for _ in range(self.I)]
-        print(pre_matrix_sp[1][1])
         pre_matrix_pd = [[0.0 for _ in range(self.K)] for _ in range(self.J)]
 
         for i in range(self.I):
@@ -123,15 +140,153 @@ class GeneticAlgorithm:
 
         return pre_matrix_sp, pre_matrix_pd
 
-    def decode(self, chromosomes: list):
+    @staticmethod
+    def stage_decode(pre_matrix: list, chromosomes: list, demand: list, capacity: list):
+        """
+        Function of decoding stage 1 and stage 2.
 
-        Dj = [0] * self.K
-        for l in range(self.L):
-            chosen_index = chromosomes[-1][l] - 1
-            Dj[chosen_index] += self.D[l]
+        :param pre_matrix: Preference matrix.
+        :type pre_matrix: list[list[float]]
+        :param chromosomes: List of chromosomes of each entity.
+        :type chromosomes: list[int]
+        :param demand: List of demand of destination entity.
+        :type demand: list[int]
+        :param capacity: List of capacity of start entity.
+        :type capacity: list[int]
+        :return: Transport matrix.
+        :rtype: list[list[int]]
+        """
+        sta_len = len(pre_matrix)
+        dest_len = len(pre_matrix[0])
+        trans_quantity = [[0 for _ in range(dest_len)] for _ in range(sta_len)]
 
-        index, chromosome = Tools.find_max_value(chromosomes[1])
+        while sum(demand):
+            chrom_index, _ = Tools.find_max_value(chromosomes)
+
+            if chrom_index >= sta_len:  # Entity is destination
+                dest_index = chrom_index - sta_len
+
+                if demand[dest_index] < 1e-6:
+                    chromosomes[chrom_index] = 0
+                    continue
+
+                sta_index, _ = Tools.find_max_value(np.array(pre_matrix)[:, dest_index].tolist())
+
+                if capacity[sta_index] >= demand[dest_index]:
+                    trans_quantity[sta_index][dest_index] += demand[dest_index]
+                    capacity[sta_index] -= demand[dest_index]
+                    demand[dest_index] = 0
+
+                    tmp = np.array(pre_matrix)
+                    tmp[:, dest_index] = -1
+                    pre_matrix = tmp.tolist()
+
+                    chromosomes[chrom_index] = 0
+
+                else:
+                    trans_quantity[sta_index][dest_index] += capacity[sta_index]
+                    demand[dest_index] -= capacity[sta_index]
+                    capacity[sta_index] = 0
+
+                    tmp = np.array(pre_matrix)
+                    tmp[sta_index, :] = -1
+                    pre_matrix = tmp.tolist()
+
+            else:  # Entity is start
+                if capacity[chrom_index] < 1e-6:
+                    chromosomes[chrom_index] = 0
+                    continue
+
+                dest_index, _ = Tools.find_max_value(pre_matrix[chrom_index])
+
+                if capacity[chrom_index] >= demand[dest_index]:
+                    trans_quantity[chrom_index][dest_index] += demand[dest_index]
+                    capacity[chrom_index] -= demand[dest_index]
+                    demand[dest_index] = 0
+
+                    tmp = np.array(pre_matrix)
+                    tmp[:, dest_index] = -1
+                    pre_matrix = tmp.tolist()
+
+                else:
+                    trans_quantity[chrom_index][dest_index] += capacity[chrom_index]
+                    demand[dest_index] -= capacity[chrom_index]
+                    capacity[chrom_index] = 0
+
+                    tmp = np.array(pre_matrix)
+                    tmp[chrom_index, :] = -1
+                    pre_matrix = tmp.tolist()
+
+                    chromosomes[chrom_index] = 0
+
+        return trans_quantity
+
+    def decode(self, population):
+        """
+        Function of decoding of genetic algorithm.
+
+        :param population: List of chromosomes of each entity in each stage.
+        :type population: list[list[int]]
+        :return: Transport matrix in stage 1 and stage 2.
+        :rtype: tuple[list, list]
+        """
         pre_matrix_sp, pre_matrix_pd = self.preference_matrix()
-        if index >= self.J:  # Entity is DC
-            dc_index = index - self.J
-            row, pre_value = Tools.find_max_value(np.array(pre_matrix_pd)[:, dc_index].tolist())
+        Dd = [0] * self.K
+        for l in range(self.L):
+            chosen_index = population[-1][l] - 1
+            Dd[chosen_index] += self.D[l]
+
+        Cp = self.Cp.copy()
+        chromosomes_pd = population[1].copy()
+        quantity_pd = self.stage_decode(pre_matrix_pd, chromosomes_pd, Dd, Cp)
+
+        Dp = [0] * self.J
+        for j in range(self.J):
+            Dp[j] = sum(quantity_pd[j])
+
+        Cs = self.Cs.copy()
+        chromosomes_sp = population[0].copy()
+        quantity_sp = self.stage_decode(pre_matrix_sp, chromosomes_sp, Dp, Cs)
+
+        return quantity_sp, quantity_pd
+
+    def crossover(self, parent1, parent2):
+        """
+        Crossover operator of the generation.
+
+        :param parent1: List of chromosomes of the 1st parent.
+        :type parent1: list[list[int]]
+        :param parent2: List of chromosomes of the 2nd parent.
+        :type parent2: list[list[int]]
+        :return: List of chromosomes of the children after crossover.
+        :rtype: list[list[int]]
+        """
+        if np.random.rand() < self.cross_p:
+            segment = np.random.randint(2, size=3)
+            child = []
+
+            for index, binary in enumerate(segment):
+                if binary:
+                    child.append(parent2[index])
+                else:
+                    child.append(parent1[index])
+
+            return child
+
+        return
+
+    def mutate(self, individual):
+        """
+        Mutation operator of the generation.
+
+        :param individual: List of chromosomes of the individual.
+        :type individual: list[list[int]]
+        :return: List of chromosomes of the children after mutation.
+        :rtype: list[list[int]]
+        """
+        if np.random.rand() < self.mutation_p:
+            segment = np.random.randint(2, size=3)
+            child = []
+            for index, binary in enumerate(segment):
+                if binary:
+                    pass
