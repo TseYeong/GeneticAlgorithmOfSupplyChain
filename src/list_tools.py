@@ -1,3 +1,6 @@
+import numpy as np
+
+
 class Tools:
     @staticmethod
     def find_max_value(lst: list) -> tuple[int, int]:
@@ -39,3 +42,20 @@ class Tools:
 
         return normalized
 
+    @staticmethod
+    def element_swap(lst: list):
+        """
+        Function of swapping two elements in the list randomly.
+
+        :param lst: A list to be swapped.
+        :type lst: list
+        :return: A list after swapping.
+        :rtype: list
+        """
+        lst_new = lst.copy()
+        indicator = np.random.choice(len(lst_new), size=2, replace=False)
+        tmp = lst_new[indicator[0]]
+        lst_new[indicator[0]] = lst_new[indicator[1]]
+        lst_new[indicator[1]] = tmp
+
+        return lst_new
