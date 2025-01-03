@@ -302,7 +302,7 @@ class GeneticAlgorithm:
         :param quant_dc: Quantity matrix between distribution centers to customer zones.
         :type quant_dc: list
         :return: Fitness value of given quantity matrices.
-        :rtype: float
+        :rtype: tuple[float, float, float, float]
         """
         cost = 0.0
         Rp = []
@@ -327,7 +327,7 @@ class GeneticAlgorithm:
                 quant_sp[i][j] * Fsp[i][j] for i in range(self.I)
             ) / sum(
                 quant_sp[i][j] for i in range(self.I)
-            )
+            ) if sum(quant_sp[i][j] for i in range(self.I)) > 0 else 0.0
             Rp.append(pla_reli)
             Fp.append(pla_flex)
 
@@ -356,7 +356,7 @@ class GeneticAlgorithm:
                 quant_pd[j][k] * Fpd[j][k] for j in range(self.J)
             ) / sum(
                 quant_pd[j][k] for j in range(self.J)
-            )
+            ) if sum(quant_pd[j][k] for j in range(self.J)) > 0 else 0.0
 
             Rd.append(dc_reli)
             Fd.append(dc_flex)
@@ -386,7 +386,7 @@ class GeneticAlgorithm:
                 quant_dc[k][l] * Fdc[k][l] for k in range(self.K)
             ) / sum(
                 quant_dc[k][l] for k in range(self.K)
-            )
+            ) if sum(quant_dc[k][l] for k in range(self.K)) > 0 else 0.0
 
             Rc.append(cz_reli)
             Fc.append(cz_flex)
@@ -400,7 +400,7 @@ class GeneticAlgorithm:
 
         fitness_val = self.fit_coff[0] * cost_norm + self.fit_coff[1] * reli_norm + self.fit_coff[2] * flex_norm
 
-        return fitness_val
+        return fitness_val, cost, reliability, flexibility
 
     def select(self, fitness_scores):
         select_prob = []
@@ -408,7 +408,7 @@ class GeneticAlgorithm:
         for fit_val in fitness_scores:
             select_prob.append(fit_val / sum(fitness_scores))
 
-        select_index = np.random.choice(len(fitness_scores), size=self.population_size, p=select_prob)
+        select_index = np.random.choice(len(fitness_scores), size=self.population_size, replace=False, p=select_prob)
         return select_index
 
     def crossover(self, parent1, parent2):
@@ -461,11 +461,51 @@ class GeneticAlgorithm:
 
     def run(self):
         populations = self.initialize_population()
-        fitness_scores = []
-        for individual in populations:
-            quant_sp, quant_pd, quant_dc = self.decode(individual)
-            fit_val = self.calculate_fitness(quant_sp, quant_pd, quant_dc)
-            fitness_scores.append(fit_val)
+        best_vals = []
 
-        for generation in range(self.generation):
+        for generation in range(self.generation + 1):
+            fitness_scores = []
+            for individual in populations:
+                quant_sp, quant_pd, quant_dc = self.decode(individual)
+                fit_val, _, _, _ = self.calculate_fitness(quant_sp, quant_pd, quant_dc)
+                fitness_scores.append(fit_val)
+
+            best_fit_val = max(fitness_scores)
+            best_vals.append(best_fit_val)
+            print(f"===>Generation {generation}, best fitness value is {best_fit_val}")
+
+            if generation == self.generation:
+                best_fit_id = fitness_scores.index(best_fit_val)
+                best_individual = populations[best_fit_id]
+                quant_sp, quant_pd, quant_dc = self.decode(best_individual)
+                Xp = [1 if sum(quant_pd[j]) > 0 else 0 for j in range(self.J)]
+                Yd = [1 if sum(quant_dc[k]) > 0 else 0 for k in range(self.K)]
+                _, cost, reliability, flexibility = self.calculate_fitness(quant_sp, quant_pd, quant_dc)
+                return best_vals, cost, reliability, flexibility, Xp, Yd
+
+            # Select
+            if len(populations) > self.population_size:
+                select_indices = self.select(fitness_scores).tolist()
+                select_indices.sort(reverse=True)
+                populations_new = [populations.pop(i) for i in select_indices]
+                populations = populations_new
+                del populations_new
+
             # Crossover
+            populations_id = list(range(self.population_size))
+            while len(populations_id) >= 2:
+                populations_id, ids = Tools.random_remove(populations_id)
+                parent1 = populations[ids[0]]
+                parent2 = populations[ids[1]]
+                child = self.crossover(parent1, parent2)
+                if child:
+                    populations.append(child)
+
+            # Mutation
+            populations_id = list(range(self.population_size))
+            while len(populations_id):
+                populations_id, ids = Tools.random_remove(populations_id, num=1)
+                parent = populations[ids[0]]
+                child = self.mutate(parent)
+                if child:
+                    populations.append(child)
