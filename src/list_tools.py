@@ -1,4 +1,5 @@
 import numpy as np
+import random
 
 
 class Tools:
@@ -73,3 +74,20 @@ class Tools:
         :rtype: list[int]
         """
         return np.random.choice(length, size=num, replace=False).tolist()
+
+    @staticmethod
+    def random_remove(lst: list, num: int = 2):
+        """
+        Function of removing some elements from the given list randomly.
+        :param lst: A list to be operated.
+        :type lst: list
+        :param num: The number of removed elements.
+        :type num: int
+        :return: The list after removing and removed elements.
+        :rtype: tuple[list, list]
+        """
+        indices = random.sample(range(len(lst)), num)
+        indices.sort(reverse=True)
+        items = [lst.pop(i) for i in indices]
+
+        return lst, items
