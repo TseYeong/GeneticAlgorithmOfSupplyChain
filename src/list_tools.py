@@ -59,3 +59,17 @@ class Tools:
         lst_new[indicator[1]] = tmp
 
         return lst_new
+
+    @staticmethod
+    def random_indices(length: int, num: int = 2) -> list:
+        """
+        Function of generating random indices of the given length list.
+
+        :param length: Length of the list.
+        :type length: int
+        :param num: Num of indices to be generated.
+        :type num: int
+        :return: A list containing chosen indices.
+        :rtype: list[int]
+        """
+        return np.random.choice(length, size=num, replace=False).tolist()
