@@ -3,18 +3,56 @@ import pandas as pd
 import numpy as np
 import os
 from list_tools import Tools
-from solver import SupplyChainSolver
 
 
 class GeneticAlgorithm:
-    def __init__(self, instance: str, population_size: int = 300,
-                 generation: int = 300, cross_p: float = 0.8, mutation_p: float = 0.3):
+    def __init__(self, instance, min_cost=0, max_cost=1, min_reli=0, max_reli=1, min_flex=0, max_flex=1,
+                 population_size=300, generation=300, cross_p=0.8, mutation_p=0.3, fit_coff=None):
+        """
+        Initialization function.
+
+        :param min_cost: Minimal cost calculated by solver.
+        :type min_cost: float
+        :param max_cost: Maximal cost calculated by solver.
+        :type max_cost: float
+        :param min_reli: Minimal reliability calculated by solver.
+        :type min_reli: float
+        :param max_reli: Maximal reliability calculated by solver.
+        :type max_reli: float
+        :param min_flex: Minimal flexibility calculated by solver.
+        :type min_flex: float
+        :param max_flex: Maximal flexibility calculated by solver
+        :type max_flex: float
+        :param instance: A string representing the name of current instance.
+        :type instance: str
+        :param population_size: Population size of the genetic algorithm (Default: 300).
+        :type population_size: int
+        :param generation: Generation size of the genetic algorithm (Default: 300).
+        :type generation: int
+        :param cross_p: Probability of the cross (Default: 0.8).
+        :type cross_p: float
+        :param mutation_p: Probability of the mutation (Default: 0.3).
+        :type mutation_p: float
+        """
+        if fit_coff is None:
+            fit_coff = [0.33, 0.33, 0.33]
+        elif type(fit_coff) is not list:
+            raise ValueError(f"'fit_coff' must be type of list, but got type of {type(fit_coff)} instead.")
+        elif len(fit_coff) != 3:
+            raise ValueError(f"'fit_coff' must be length of 3, but got length of {len(fit_coff)} instead.")
 
         self.instance = instance
+        self.min_cost = min_cost
+        self.max_cost = max_cost
+        self.min_reli = min_reli
+        self.max_reli = max_reli
+        self.min_flex = min_flex
+        self.max_flex = max_flex
         self.population_size = population_size
         self.generation = generation
         self.cross_p = cross_p
         self.mutation_p = mutation_p
+        self.fit_coff = fit_coff
 
         root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         df_faci_params = pd.read_csv(f"{root_path}/instances/{self.instance}/facilities_params_{self.instance}.csv")
@@ -58,18 +96,6 @@ class GeneticAlgorithm:
         self.fsp = [[float(x.split(',')[2]) for x in df_stage1.iloc[i]] for i in range(self.I)]
         self.fpd = [[float(x.split(',')[2]) for x in df_stage2.iloc[j]] for j in range(self.J)]
         self.fdc = [[float(x.split(',')[2]) for x in df_stage3.iloc[k]] for k in range(self.K)]
-
-    def generate_boundary(self, opt_type):
-        """
-        Function of generating the boundary (both upper and lower) of specific optimization type based on Gurobi.
-
-        :param opt_type: Optimization problem type.
-        :type opt_type: str
-        :return: A tuple containing upper and lower boundaries.
-        :rtype: tuple[float, float]
-        """
-        solver = SupplyChainSolver(instance=self.instance, opt_type=opt_type)
-
 
     def generate_chromosome(self, stage: int):
         """
@@ -122,7 +148,7 @@ class GeneticAlgorithm:
     def preference_matrix(self):
         """
         Generate preference matrix in stage 1 and 2.
-        :return:
+        :return: Matrix containing preference scores in stage 1 and stage 2.
         :rtype: tuple[list[list[float]], list[list[float]]]
         """
         cost = [self.Ssp, self.Spd, self.Sdc]
@@ -234,23 +260,25 @@ class GeneticAlgorithm:
 
         return trans_quantity
 
-    def decode(self, population):
+    def decode(self, Individual):
         """
         Function of decoding of genetic algorithm.
 
-        :param population: List of chromosomes of each entity in each stage.
-        :type population: list[list[int]]
-        :return: Transport matrix in stage 1 and stage 2.
-        :rtype: tuple[list, list]
+        :param Individual: List of chromosomes of each entity in each stage.
+        :type Individual: list[list[int]]
+        :return: Transport matrix in each stage.
+        :rtype: tuple[list, list, list]
         """
         pre_matrix_sp, pre_matrix_pd = self.preference_matrix()
         Dd = [0] * self.K
+        quantity_dc = [[0 for _ in range(self.L)] for _ in range(self.K)]
         for l in range(self.L):
-            chosen_index = population[-1][l] - 1
+            chosen_index = Individual[-1][l] - 1
             Dd[chosen_index] += self.D[l]
+            quantity_dc[chosen_index][l] += self.D[l]
 
         Cp = self.Cp.copy()
-        chromosomes_pd = population[1].copy()
+        chromosomes_pd = Individual[1].copy()
         quantity_pd = self.stage_decode(pre_matrix_pd, chromosomes_pd, Dd, Cp)
 
         Dp = [0] * self.J
@@ -258,13 +286,130 @@ class GeneticAlgorithm:
             Dp[j] = sum(quantity_pd[j])
 
         Cs = self.Cs.copy()
-        chromosomes_sp = population[0].copy()
+        chromosomes_sp = Individual[0].copy()
         quantity_sp = self.stage_decode(pre_matrix_sp, chromosomes_sp, Dp, Cs)
 
-        return quantity_sp, quantity_pd
+        return quantity_sp, quantity_pd, quantity_dc
 
-    def select(self):
-        pass
+    def calculate_fitness(self, quant_sp, quant_pd, quant_dc):
+        """
+        Function of calculating fitness value.
+
+        :param quant_sp: Quantity matrix between suppliers to plants.
+        :type quant_sp: list
+        :param quant_pd: Quantity matrix between plants to distribution centers.
+        :type quant_pd: list
+        :param quant_dc: Quantity matrix between distribution centers to customer zones.
+        :type quant_dc: list
+        :return: Fitness value of given quantity matrices.
+        :rtype: float
+        """
+        cost = 0.0
+        Rp = []
+        Fp = []
+        Fsp = [[0.0 for _ in range(self.J)] for _ in range(self.I)]
+
+        for j in range(self.J):
+            expr = 1.0
+            for i in range(self.I):
+                cost += self.Ssp[i][j] * quant_sp[i][j]
+
+                if quant_sp[i][j] > 0:
+                    expr *= 1 - self.rsp[i][j] * self.rs[i]
+
+                if self.fs[i] < self.fsp[i][j]:
+                    Fsp[i][j] = self.fs[i]
+                else:
+                    Fsp[i][j] = self.fsp[i][j]
+
+            pla_reli = self.rp[j] * (1 - expr)
+            pla_flex = sum(
+                quant_sp[i][j] * Fsp[i][j] for i in range(self.I)
+            ) / sum(
+                quant_sp[i][j] for i in range(self.I)
+            )
+            Rp.append(pla_reli)
+            Fp.append(pla_flex)
+
+            if sum(quant_pd[j]) > 0:
+                cost += self.FCd[j]
+
+        Rd = []
+        Fd = []
+        Fpd = [[0.0 for _ in range(self.K)] for _ in range(self.J)]
+
+        for k in range(self.K):
+            expr = 1.0
+            for j in range(self.J):
+                cost += self.Spd[j][k] * quant_pd[j][k]
+
+                if quant_pd[j][k] > 0:
+                    expr *= 1 - self.rpd[j][k] * Rp[j]
+
+                if Fp[j] <= self.fpd[j][k]:
+                    Fpd[j][k] = Fp[j]
+                else:
+                    Fpd[j][k] = self.fpd[j][k]
+
+            dc_reli = self.rd[k] * (1 - expr)
+            dc_flex = sum(
+                quant_pd[j][k] * Fpd[j][k] for j in range(self.J)
+            ) / sum(
+                quant_pd[j][k] for j in range(self.J)
+            )
+
+            Rd.append(dc_reli)
+            Fd.append(dc_flex)
+
+            if sum(quant_dc[k]) > 0:
+                cost += self.FCd[k]
+
+        Rc = []
+        Fc = []
+        Fdc = [[0.0 for _ in range(self.L)] for _ in range(self.K)]
+
+        for l in range(self.L):
+            expr = 1.0
+            for k in range(self.K):
+                cost += self.Sdc[k][l] * quant_dc[k][l]
+
+                if quant_dc[k][l] > 0:
+                    expr *= 1 - self.rdc[k][l] * Rd[k]
+
+                if Fd[k] <= self.fdc[k][l]:
+                    Fdc[k][l] = Fd[k]
+                else:
+                    Fdc[k][l] = self.fdc[k][l]
+
+            cz_reli = 1 - expr
+            cz_flex = sum(
+                quant_dc[k][l] * Fdc[k][l] for k in range(self.K)
+            ) / sum(
+                quant_dc[k][l] for k in range(self.K)
+            )
+
+            Rc.append(cz_reli)
+            Fc.append(cz_flex)
+
+        reliability = sum(Rc) / len(Rc)
+        flexibility = sum(Fc) / len(Rc)
+
+        cost_norm = (self.max_cost - cost) / (self.max_cost - self.min_cost)  # Minimize cost
+        reli_norm = (reliability - self.min_reli) / (self.max_reli - self.min_reli)  # Maximize reliability
+        flex_norm = (flexibility - self.min_flex) / (self.max_flex - self.min_flex)  # Maximize flexibility
+
+        fitness_val = self.fit_coff[0] * cost_norm + self.fit_coff[1] * reli_norm + self.fit_coff[2] * flex_norm
+
+        return fitness_val
+
+    def select(self, fitness_scores):
+        select_prob = []
+
+        for fit_val in fitness_scores:
+            select_prob.append(fit_val / sum(fitness_scores))
+
+        select_index = np.random.choice(len(fitness_scores), size=self.population_size, p=select_prob)
+        return select_index
 
     def crossover(self, parent1, parent2):
         """
@@ -313,3 +458,14 @@ class GeneticAlgorithm:
             return child
 
         return
+
+    def run(self):
+        populations = self.initialize_population()
+        fitness_scores = []
+        for individual in populations:
+            quant_sp, quant_pd, quant_dc = self.decode(individual)
+            fit_val = self.calculate_fitness(quant_sp, quant_pd, quant_dc)
+            fitness_scores.append(fit_val)
+
+        for generation in range(self.generation):
+            # Crossover
