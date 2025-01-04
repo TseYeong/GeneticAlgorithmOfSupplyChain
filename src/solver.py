@@ -131,6 +131,9 @@ class SupplyChainSolver:
             self.Fp = self.model.addVars(self.J, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fp')
             self.Fd = self.model.addVars(self.K, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fd')
             self.Fc = self.model.addVars(self.L, lb=0, ub=1, vtype=grb.GRB.CONTINUOUS, name='Fc')
+            self.Fpz = self.model.addVars(self.J, vtype=grb.GRB.BINARY, name='Fpz')
+            self.Fdz = self.model.addVars(self.K, vtype=grb.GRB.BINARY, name='Fdz')
+            self.Fcz = self.model.addVars(self.L, vtype=grb.GRB.BINARY, name='Fcz')
 
     def set_equations(self):
         """
@@ -279,7 +282,7 @@ class SupplyChainSolver:
                         name=f"Constraint_Ddc_{k}_{l}"
                     )
 
-            for i in range(self.L):
+            for i in range(self.I):
                 for j in range(self.J):
                     self.model.addConstr(
                         self.Fsp[i, j] == self.Dsp[i, j] * self.fs[i] + (1 - self.Dsp[i, j]) * self.fsp[i][j],
@@ -288,11 +291,11 @@ class SupplyChainSolver:
 
             for j in range(self.J):
                 self.model.addConstr(
-                    self.Fp[j] * grb.quicksum(
-                        self.Qsp[i, j] for i in range(self.I)
-                    ) == grb.quicksum(
+                    self.Fp[j] == grb.quicksum(
                         self.Qsp[i, j] * self.Fsp[i, j] for i in range(self.I)
-                    ),
+                    ) / (grb.quicksum(
+                        self.Qsp[i, j] for i in range(self.I)
+                    ) + 1e-6),
                     name=f"Constraint11_{j}"
                 )
 
@@ -305,11 +308,11 @@ class SupplyChainSolver:
 
             for k in range(self.K):
                 self.model.addConstr(
-                    self.Fd[k] * grb.quicksum(
-                        self.Qpd[j, k] for j in range(self.J)
-                    ) == grb.quicksum(
+                    self.Fd[k] == grb.quicksum(
                         self.Qpd[j, k] * self.Fpd[j, k] for j in range(self.J)
-                    ),
+                    ) / (grb.quicksum(
+                        self.Qpd[j, k] for j in range(self.J)
+                    ) + 1e-6),
                     name=f"Constraint13_{k}"
                 )
 
@@ -322,11 +325,11 @@ class SupplyChainSolver:
 
             for l in range(self.L):
                 self.model.addConstr(
-                    self.Fc[l] * grb.quicksum(
-                        self.Qdc[k, l] for k in range(self.K)
-                    ) == grb.quicksum(
+                    self.Fc[l] == grb.quicksum(
                         self.Qdc[k, l] * self.Fdc[k, l] for k in range(self.K)
-                    ),
+                    ) / (grb.quicksum(
+                        self.Qdc[k, l] for k in range(self.K)
+                    ) + 1e-6),
                     name=f"Constraint15_{l}"
                 )
 
@@ -388,8 +391,6 @@ class SupplyChainSolver:
                 )
 
         else:
-            self.model.setParam('MIPGap', 0.05)
-            self.model.setParam('TimeLimit', 600)
             if obj == 'min':
                 self.model.setObjective(
                     grb.quicksum(self.Fc) / self.L,
