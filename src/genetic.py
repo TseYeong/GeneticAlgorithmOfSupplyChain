@@ -325,9 +325,9 @@ class GeneticAlgorithm:
             pla_reli = self.rp[j] * (1 - expr)
             pla_flex = sum(
                 quant_sp[i][j] * Fsp[i][j] for i in range(self.I)
-            ) / sum(
+            ) / (sum(
                 quant_sp[i][j] for i in range(self.I)
-            ) if sum(quant_sp[i][j] for i in range(self.I)) > 0 else 0.0
+            ) + 1e-6)
             Rp.append(pla_reli)
             Fp.append(pla_flex)
 
@@ -354,9 +354,9 @@ class GeneticAlgorithm:
             dc_reli = self.rd[k] * (1 - expr)
             dc_flex = sum(
                 quant_pd[j][k] * Fpd[j][k] for j in range(self.J)
-            ) / sum(
+            ) / (sum(
                 quant_pd[j][k] for j in range(self.J)
-            ) if sum(quant_pd[j][k] for j in range(self.J)) > 0 else 0.0
+            ) + 1e-6)
 
             Rd.append(dc_reli)
             Fd.append(dc_flex)
@@ -384,9 +384,9 @@ class GeneticAlgorithm:
             cz_reli = 1 - expr
             cz_flex = sum(
                 quant_dc[k][l] * Fdc[k][l] for k in range(self.K)
-            ) / sum(
+            ) / (sum(
                 quant_dc[k][l] for k in range(self.K)
-            ) if sum(quant_dc[k][l] for k in range(self.K)) > 0 else 0.0
+            ) + 1e-6)
 
             Rc.append(cz_reli)
             Fc.append(cz_flex)
