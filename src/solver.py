@@ -88,6 +88,7 @@ class SupplyChainSolver:
         self.Sdc = [[float(x.split(',')[0]) for x in df_stage3.iloc[k]] for k in range(self.K)]
 
         self.model = grb.Model(name="CostOptimization")
+        self.model.setParam(grb.GRB.Param.OutputFlag, 0)
 
         # Variables
         self.Qsp = self.model.addVars(self.I, self.J, lb=0, vtype=grb.GRB.INTEGER, name='Qsp')
@@ -391,6 +392,15 @@ class SupplyChainSolver:
                 )
 
         else:
+            self.model.setParam(grb.GRB.Param.MIPGap, 0.05)
+
+            if self.opt_type[0] in ('S', 'M'):
+                self.model.setParam(grb.GRB.Param.TimeLimit, 300)
+            elif self.opt_type[0] == 'L':
+                self.model.setParam(grb.GRB.Param.TimeLimit, 600)
+            else:
+                self.model.setParam(grb.GRB.Param.TimeLimit, 1200)
+
             if obj == 'min':
                 self.model.setObjective(
                     grb.quicksum(self.Fc) / self.L,
