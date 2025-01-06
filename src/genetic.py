@@ -6,7 +6,7 @@ from list_tools import Tools
 
 
 class GeneticAlgorithm:
-    def __init__(self, instance, min_cost=0, max_cost=1, min_reli=0, max_reli=1, min_flex=0, max_flex=1,
+    def __init__(self, instance, min_cost=0, max_cost=200000, min_reli=0, max_reli=1, min_flex=0, max_flex=1,
                  population_size=300, generation=300, cross_p=0.8, mutation_p=0.3, fit_coff=None):
         """
         Initialization function.
