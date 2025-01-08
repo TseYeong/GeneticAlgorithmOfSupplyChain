@@ -10,8 +10,11 @@ def solve_boundary(instance, opt_type, obj):
     solver = SupplyChainSolver(instance, opt_type)
     model = solver.set_equations().generate_objective(obj).solve()
     print(f"==========> {obj.upper()} boundary of {opt_type} of instance {instance} solved.")
+    del solver
+    obj_val = round(model.ObjVal, 2)
+    del model
 
-    return round(model.ObjVal, 2)
+    return obj_val
 
 
 def save_to_file(data, path):

@@ -396,12 +396,12 @@ class SupplyChainSolver:
 
             # if self.instance[0] == 'S':
             #     self.model.setParam(grb.GRB.Param.TimeLimit, 120)
-            # elif self.instance[0] == 'M':
-            #     self.model.setParam(grb.GRB.Param.TimeLimit, 300)
-            # elif self.instance[0] == 'L':
-            #     self.model.setParam(grb.GRB.Param.TimeLimit, 600)
-            # else:
-            #     self.model.setParam(grb.GRB.Param.TimeLimit, 1200)
+            if self.instance[0] == 'M':
+                self.model.setParam(grb.GRB.Param.TimeLimit, 300)
+            elif self.instance[0] == 'L':
+                self.model.setParam(grb.GRB.Param.TimeLimit, 600)
+            else:
+                self.model.setParam(grb.GRB.Param.TimeLimit, 1200)
 
             if obj == 'min':
                 self.model.setObjective(
