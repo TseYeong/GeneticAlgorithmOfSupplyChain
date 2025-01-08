@@ -1,14 +1,17 @@
+import os.path
+
 from solver import SupplyChainSolver
-import numpy as np
 import pandas as pd
+import warnings
+warnings.filterwarnings("ignore")
 
 
 def solve_boundary(instance, opt_type, obj):
     solver = SupplyChainSolver(instance, opt_type)
     model = solver.set_equations().generate_objective(obj).solve()
-    print(f"{obj.upper()} boundary of {opt_type} of instance {instance} solved.")
+    print(f"==========> {obj.upper()} boundary of {opt_type} of instance {instance} solved.")
 
-    return model.ObjVal
+    return round(model.ObjVal, 2)
 
 
 def save_to_file(data, path):
@@ -32,22 +35,23 @@ def main():
         mac = solve_boundary(ins, 'cost', 'max')
         mic = solve_boundary(ins, 'cost', 'min')
         mar = solve_boundary(ins, 'reli', 'max')
-        mir = solve_boundary(ins, 'reli', 'min')
+        # mir = solve_boundary(ins, 'reli', 'min')
         maf = solve_boundary(ins, 'flex', 'max')
         # mif = solve_boundary(ins, 'flex', 'min')
-        mif = 0.0
+        mir = 0.0
+        mif = 0.0   
 
         bound_val = [mac, mic, mar, mir, maf, mif]
 
         for i in range(boundary_data.shape[0]):
             boundary_data[ins][i] = bound_val[i]
 
-        print(f"Finish solving boundaries for instance {ins}")
+        print(f"==========> Finish solving boundaries for instance {ins}")
 
-    path = './instances/boundary.csv'
+    root_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    path = f"{root_path}/instances/boundary.csv"
     save_to_file(boundary_data, path)
 
 
 if __name__ == "__main__":
     main()
-
