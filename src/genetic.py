@@ -6,7 +6,7 @@ from list_tools import Tools
 
 
 class GeneticAlgorithm:
-    def __init__(self, instance, min_cost=0, max_cost=200000, min_reli=0, max_reli=1, min_flex=0, max_flex=1,
+    def __init__(self, instance, min_cost, max_cost, min_reli, max_reli, min_flex, max_flex,
                  population_size=300, generation=300, cross_p=0.8, mutation_p=0.3, fit_coff=None):
         """
         Initialization function.
@@ -151,9 +151,9 @@ class GeneticAlgorithm:
         :return: Matrix containing preference scores in stage 1 and stage 2.
         :rtype: tuple[list[list[float]], list[list[float]]]
         """
-        cost = [self.Ssp, self.Spd, self.Sdc]
-        reli = [self.rsp, self.rpd, self.rdc]
-        flex = [self.fsp, self.fpd, self.fdc]
+        cost = [self.Ssp, self.Spd]
+        reli = [self.rsp, self.rpd]
+        flex = [self.fsp, self.fpd]
 
         normalized_cost = Tools.normalization(cost)
         normalized_reli = Tools.normalization(reli)
