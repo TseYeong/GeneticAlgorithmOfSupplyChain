@@ -154,7 +154,7 @@ Each chromosome consists of three gene segments representing the three transport
 
 The decoding process starts with stage 3, the integer in the gene corresponding to the customer zone represents the allocated DC. The summation of the demands at the customer zones allocated to each DC provides the demand corresponding to the particular DC.
 
-The ***preference matrix*** is utilized in decoding stage 1 and 2. Assume a preference matrix $[A_{ij}]_{m\times n}$, each element $A_{ij}$ is obtained as follows:
+The ***preference matrix*** is utilized in decoding stage 1 and 2. Assume a preference matrix $A$, each element $A_{ij}$ is obtained as follows:
 
 $$A_{ij}=Nr_{ij}+Nf_{ij}-Nc_{ij}$$
 
