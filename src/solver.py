@@ -296,7 +296,7 @@ class SupplyChainSolver:
                         self.Qsp[i, j] * self.Fsp[i, j] for i in range(self.I)
                     ) / (grb.quicksum(
                         self.Qsp[i, j] for i in range(self.I)
-                    ) + 1e-6),
+                    ) + 1),
                     name=f"Constraint11_{j}"
                 )
 
@@ -313,7 +313,7 @@ class SupplyChainSolver:
                         self.Qpd[j, k] * self.Fpd[j, k] for j in range(self.J)
                     ) / (grb.quicksum(
                         self.Qpd[j, k] for j in range(self.J)
-                    ) + 1e-6),
+                    ) + 1),
                     name=f"Constraint13_{k}"
                 )
 
@@ -330,7 +330,7 @@ class SupplyChainSolver:
                         self.Qdc[k, l] * self.Fdc[k, l] for k in range(self.K)
                     ) / (grb.quicksum(
                         self.Qdc[k, l] for k in range(self.K)
-                    ) + 1e-6),
+                    ) + 1),
                     name=f"Constraint15_{l}"
                 )
 
@@ -394,12 +394,14 @@ class SupplyChainSolver:
         else:
             self.model.setParam(grb.GRB.Param.MIPGap, 0.05)
 
-            if self.opt_type[0] in ('S', 'M'):
-                self.model.setParam(grb.GRB.Param.TimeLimit, 300)
-            elif self.opt_type[0] == 'L':
-                self.model.setParam(grb.GRB.Param.TimeLimit, 600)
-            else:
-                self.model.setParam(grb.GRB.Param.TimeLimit, 1200)
+            # if self.instance[0] == 'S':
+            #     self.model.setParam(grb.GRB.Param.TimeLimit, 120)
+            # elif self.instance[0] == 'M':
+            #     self.model.setParam(grb.GRB.Param.TimeLimit, 300)
+            # elif self.instance[0] == 'L':
+            #     self.model.setParam(grb.GRB.Param.TimeLimit, 600)
+            # else:
+            #     self.model.setParam(grb.GRB.Param.TimeLimit, 1200)
 
             if obj == 'min':
                 self.model.setObjective(
