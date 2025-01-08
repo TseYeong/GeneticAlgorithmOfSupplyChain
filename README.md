@@ -21,11 +21,11 @@ Generate instances with different scales (20 scales totallyl) according to some 
 
 All datas follow the following distribution:
 
-![](https://cdn.jsdelivr.net/gh/TseYeong/blog-plug@main/image-20250106194122506.png)
+<img src="https://cdn.jsdelivr.net/gh/TseYeong/blog-plug@main/image-20250106194122506.png" style="zoom:80%;">
 
 And the number of facilities of each instance is shown in the following:
 
-![](https://cdn.jsdelivr.net/gh/TseYeong/blog-plug@main/image-20250106200700963.png)
+<img src="https://cdn.jsdelivr.net/gh/TseYeong/blog-plug@main/image-20250106200700963.png" style="zoom:60%;">
 
 **Output**: the generated data is written to the absolute path `./instances/Problem code/`
 
@@ -147,4 +147,26 @@ where,
 <img src="https://latex.codecogs.com/svg.image?\inline&space;\large&space;\displaystyle\sum_{i=1}^3w_i=1,\text{and}\;w_i\ge&space;0\quad\forall&space;i" title="\displaystyle\sum_{i=1}^3w_i=1,\text{and}\;w_i\ge 0\quad\forall i" />
 
 Our goal now is to maximize the fitness value.
+
+**Chromosome and encoding/decoding**:
+
+Each chromosome consists of three gene segments representing the three transportation stages, namely, supplier-plant, plant-DC, and DC-CZ. 
+
+The decoding process starts with stage 3, the integer in the gene corresponding to the customer zone represents the allocated DC. The summation of the demands at the customer zones allocated to each DC provides the demand corresponding to the particular DC.
+
+The ***preference matrix*** is utilized in decoding stage 1 and 2. Assume a preference matrix $[A_{ij}]_{m\times n}$, each element $A_{ij}$ is obtained as follows:
+
+$$A_{ij}=Nr_{ij}+Nf_{ij}-Nc_{ij}$$
+
+where $Nr_{ij},Nf_{ij},Nc_{ij}$ is the normalized value of reliability, volume flexibility and cost between entity $i$ and entity $j$, respectively.
+
+Decoding stage 2 starts with the entity corresponding to the highest priority, that is, the entity with highest integer in the gene representing the stage 2. If this entity is DC, then the highest value in the column corresponding to the particular DC in $A_{ij}$ is identified and the plant in the corresponding row is selected as the most promising source that could meet the demand of this DC subject to the capacity constraint. In case, the entity corresponding to the highest priority is a plant, then the most promising DC is identified using the above methodology in a reverse manner. 
+
+If the demand at a DC is met, then all the column values in the preference matrix corresponding to the current DC are set to 0 with its priority in the chromosome. Else, if the capacity of a plant is fully used, then all the row values in corresponding to the current plant are set to 0 with priority value. This process is repeated until demand at each DC is completely met.
+
+This method is implemented for decoding stage 1 as well.
+
+A decoding example is shown as follows:
+
+<img src="https://cdn.jsdelivr.net/gh/TseYeong/blog-plug@main/image-20250108111043598.png" style="zoom:35%;" />
 
